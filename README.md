@@ -20,6 +20,18 @@ common algorithm and Rust core:
 Each is usable on its own. Below, there's a dedicated install section for
 each — and each can optionally use the `dynamo_rs` Rust core for speed.
 
+> ### ⚠️ Branch note
+>
+> All of the install recipes below clone the **`rust-bridge`** branch of each
+> sub-repo. That's where the current backend refactor, Rust core fixes, and
+> cross-repo coordination live. Default branches (`master`) will catch up
+> once `rust-bridge` is merged in each sub-repo.
+>
+> If you forget the `-b rust-bridge` flag, MATLAB won't have a `'backend'`
+> option, the Rust core will use the older `expand_labels_bfs` border fill
+> (~+2 % peak-count drift vs MATLAB), and the README links in this repo
+> will point at paths that don't exist yet on the default branch.
+
 ---
 
 ## Which one should I use?
@@ -50,7 +62,7 @@ optional steps 2–3 add the Rust speed path.
 ### 1. Clone
 
 ```bash
-git clone --recursive https://github.com/preraulab/DYNAM-O_dev.git
+git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_dev.git
 cd DYNAM-O_dev
 git submodule update --init --recursive
 ```
@@ -71,7 +83,7 @@ Requires the [Rust toolchain](https://rustup.rs):
 ```bash
 # either clone the Rust repo as a sibling of DYNAM-O_dev…
 cd ..
-git clone https://github.com/preraulab/DYNAM-O_rs.git
+git clone -b rust-bridge https://github.com/preraulab/DYNAM-O_rs.git
 cd DYNAM-O_rs/rust
 cargo build --release
 
@@ -131,7 +143,7 @@ implementations.
 ### 1. Clone
 
 ```bash
-git clone https://github.com/preraulab/DYNAM-O_py.git
+git clone -b rust-bridge https://github.com/preraulab/DYNAM-O_py.git
 cd DYNAM-O_py
 ```
 
@@ -149,7 +161,7 @@ Requires the [Rust toolchain](https://rustup.rs):
 ```bash
 # from a sibling clone of DYNAM-O_rs
 cd ..
-git clone https://github.com/preraulab/DYNAM-O_rs.git
+git clone -b rust-bridge https://github.com/preraulab/DYNAM-O_rs.git
 cd DYNAM-O_rs/rust
 maturin develop --release --features python
 # installs `dynamo_rs` into your active virtualenv
@@ -196,7 +208,7 @@ Standalone build of the pure-Rust kernel. Useful if you want to integrate
 ### 1. Clone
 
 ```bash
-git clone https://github.com/preraulab/DYNAM-O_rs.git
+git clone -b rust-bridge https://github.com/preraulab/DYNAM-O_rs.git
 cd DYNAM-O_rs/rust
 ```
 
