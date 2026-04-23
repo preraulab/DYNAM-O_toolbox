@@ -45,7 +45,7 @@ Are you integrating Rust into your own pipeline?           →  DYNAM-O_rs (libr
 
 ```bash
 # clone everything (MATLAB + Rust + Python, all three submodules)
-git clone --recursive https://github.com/prerau/DYNAM-O_toolbox.git
+git clone --recursive https://github.com/preraulab/DYNAM-O_toolbox.git
 cd DYNAM-O_toolbox
 git submodule update --init --recursive
 ```
