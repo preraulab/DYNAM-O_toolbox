@@ -60,7 +60,7 @@ e.g. `powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Yes`.
 
 ### What the script does
 
-- **Clones** any missing sub-repo (`DYNAM-O_rs`, `DYNAMO_dev`, `DYNAM-O_py`) on the `rust-bridge` branch. If a sub-repo is already present (e.g., from a prior `git clone --recursive` that pinned a different branch), it offers to fetch + check out `rust-bridge` so all three are aligned.
+- **Clones** any missing sub-repo (`DYNAM-O_rs`, `DYNAMO_dev`, `DYNAM-O_py`) on the `rust-bridge` branch, *with submodules* — each `git clone --recursive -b rust-bridge …` + a defensive `git submodule update --init --recursive` pass so the nested helpers (CSSuicontrols, multitaper_spectrogram, nanstats, erpplot, dynamo_helpers, etc.) land correctly even on flaky networks. If a sub-repo is already present (e.g., from a prior `git clone --recursive` that pinned a different branch), it offers to fetch + check out `rust-bridge` so all three are aligned.
 - **Installs Rust** via rustup (prompts once for consent).
 - **Builds** `libdynamo_rs` and the `dynamo` CLI binary.
 - **Detects MATLAB** (`matlab` on PATH, or `/Applications/MATLAB*.app` on Mac / `C:\Program Files\MATLAB\*` on Windows). If found and you consent, runs `matlab -batch build_rust_mex` headless. If headless fails (usually another MATLAB session has the license), prints the copy-paste recipe for your existing MATLAB.
@@ -70,6 +70,50 @@ e.g. `powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Yes`.
 It's **idempotent** — re-run it after any `git pull` to rebuild, or to add the MATLAB / Python pieces later. Each step short-circuits when its output already exists.
 
 If anything fails, skip to the manual per-language sections below.
+
+### Manual equivalent (if you'd rather not run the script)
+
+The bootstrap is a convenience wrapper — everything it does can be run by hand:
+
+```bash
+# 1. Clone each sub-repo WITH submodules on rust-bridge
+git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_rs.git
+git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_dev.git DYNAMO_dev
+git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_py.git
+
+# If --recursive didn't fully initialize the submodules (flaky network, etc.),
+# re-run inside each sub-repo:
+(cd DYNAM-O_rs && git submodule update --init --recursive)
+(cd DYNAMO_dev && git submodule update --init --recursive)
+(cd DYNAM-O_py && git submodule update --init --recursive)
+
+# 2. Rust toolchain (skip if `cargo --version` already works)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
+# 3. Build Rust core + CLI
+(cd DYNAM-O_rs/rust && cargo build --release && cargo build --release --bin dynamo)
+
+# 4. MATLAB MEX — inside MATLAB, not the shell
+#    (cd DYNAMO_dev/rust_bridge; build_rust_mex)
+
+# 5. Python venv + pydynamo
+cd DYNAM-O_py
+python3 -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip maturin
+(cd ../DYNAM-O_rs/rust && maturin develop --release --features python)
+pip install -e .
+```
+
+If a sub-repo is already cloned at a different branch (e.g., `master`),
+switch with:
+```bash
+cd <sub-repo>
+git fetch origin rust-bridge
+git checkout rust-bridge
+git pull --ff-only
+git submodule update --init --recursive
+```
 
 ### Share pre-built binaries (contributors)
 

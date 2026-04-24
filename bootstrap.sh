@@ -71,22 +71,28 @@ align_subrepo() {
         current="$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || echo 'DETACHED')"
         if [ "$current" = "$BRANCH" ]; then
             ok "$dir on $BRANCH."
-            git -C "$dir" submodule update --init --recursive >/dev/null 2>&1 || true
+            info "  syncing submodules: git -C $dir submodule update --init --recursive"
+            git -C "$dir" submodule update --init --recursive || true
         else
             warn "$dir is on '$current' (expected '$BRANCH')."
             if confirm "Fetch + check out $BRANCH in $dir?"; then
                 git -C "$dir" fetch origin "$BRANCH"
                 git -C "$dir" checkout "$BRANCH"
                 git -C "$dir" pull --ff-only origin "$BRANCH" || true
-                git -C "$dir" submodule update --init --recursive >/dev/null 2>&1 || true
+                info "  syncing submodules: git -C $dir submodule update --init --recursive"
+                git -C "$dir" submodule update --init --recursive || true
                 ok "$dir now on $BRANCH."
             else
                 warn "Leaving $dir on '$current'. Downstream builds may use stale code."
             fi
         fi
     else
-        info "Cloning $dir (branch $BRANCH)..."
+        info "Cloning: git clone --recursive -b $BRANCH $CLONE_BASE/$repo.git $dir"
         git clone --recursive -b "$BRANCH" "$CLONE_BASE/$repo.git" "$dir"
+        # --recursive on git clone already runs the initial submodule update;
+        # the explicit call below is a no-op safety net for cases where
+        # --recursive silently failed on a subset (e.g. bad network).
+        git -C "$dir" submodule update --init --recursive || true
     fi
 }
 
