@@ -233,11 +233,12 @@ runDYNAMO('segment', 'backend', 'matlab')   % falls back to pure MATLAB
 
 Measured 2026-04-24 on an 8-core M-series, warm MATLAB R2025b, bundled
 night recording:
-- `backend='rust'`:   **36.7 s** end-to-end (extract 15.6 s, rest is
-  parametric/spline fits + summary plot + histograms + IO).
-- `backend='matlab'`: **149.9 s** end-to-end (extract 123.9 s, same
-  MATLAB-side downstream stages).
-- **4.08× total speedup**, **7.96×** on the Rust extract path alone.
+- `backend='rust'`:   **~36.7 s** end-to-end (Rust extract ~15.6 s, rest
+  is parametric/spline fits + summary plot + MATLAB IO).
+- `backend='matlab'`: **~153 s** end-to-end, pure MATLAB (reference
+  implementation; only the bundled `multitaper_spectrogram_mex` is
+  compiled — histogram, extract, refine, mask all stay pure MATLAB).
+- **~4.2× total speedup**, **~8×** on the Rust extract path alone.
 - Final peak-count parity: −0.94 % (Rust 36 312 vs MATLAB 36 656).
 
 Detailed API, options, and recipes:
