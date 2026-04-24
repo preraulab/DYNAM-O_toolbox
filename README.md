@@ -189,6 +189,30 @@ See [`DYNAMO_dev/rust_bridge/benchmarks/README.md`](https://github.com/preraulab
 > (~+2 % peak-count drift vs MATLAB), and the README links in this repo
 > will point at paths that don't exist yet on the default branch.
 
+### Known per-platform gotchas
+
+Two pre-existing system issues observed on RHEL 8 / CentOS 8 hosts (neither is a bug in this toolbox — both are environment quirks):
+
+**Git HTTPS push fails with `error setting certificate file: /etc/ssl/certs/ca-certificates.crt`.** RHEL/CentOS use a different CA bundle path than Debian-style distros. One-time per-user fix:
+
+```bash
+git config --global http.sslCAInfo /etc/pki/tls/certs/ca-bundle.crt
+# or, if SSH keys are set up, switch the remote to SSH:
+git remote set-url origin git@github.com:preraulab/DYNAM-O_dev.git
+```
+
+Symptom: bootstrap's MEX-push or benchmark-push steps print "push failed — commit is local." The commit is safe locally; push manually once git can talk to GitHub.
+
+**Python 3.6 can't build maturin.** RHEL 8 ships Python 3.6.8 by default; maturin (required to build the pydynamo Rust wheel) needs Python ≥ 3.7. Either install a newer interpreter:
+
+```bash
+sudo dnf install python39         # or python311
+```
+
+…and rerun the bootstrap with it on PATH, or just decline the Python step at bootstrap's confirm prompt (the MATLAB and standalone-Rust-CLI paths don't need Python).
+
+**macOS 26 + MATLAB R2025b interactive runs.** A recurrent Qt/CEF font-rendering SIGSEGV can crash long interactive `runDYNAMO('night', 'backend', 'matlab')` runs. The `matlab` backend path no longer uses `waitbar` (removed 2026-04-24); run via `benchmark_runDYNAMO` or `bash run_benchmark.sh` (both use `matlab -batch`) for any long measurement — `-batch` mode never loads the desktop / Qt / CEF, so the crash path literally isn't in the process.
+
 ---
 
 ## Which one should I use?
