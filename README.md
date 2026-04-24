@@ -14,7 +14,7 @@ common algorithm and Rust core:
 | Implementation | Repo | Best for |
 |---|---|---|
 | **MATLAB** | [`DYNAM-O_dev`](https://github.com/preraulab/DYNAM-O_dev) | authoritative pipeline, File Manager GUI, full statistics, standalone app builds |
-| **Rust core** | [`DYNAM-O_rs`](https://github.com/preraulab/DYNAM-O_rs) | shared kernel (watershed, merge, trim, histograms); not used standalone |
+| **Rust core + CLI** | [`DYNAM-O_rs`](https://github.com/preraulab/DYNAM-O_rs) | shared kernel (watershed, merge, trim, baseline, SO-power/phase time series, artifact detection, 2D histograms) AND a standalone `dynamo` CLI binary — no MATLAB/Python needed at runtime |
 | **Python** | [`DYNAM-O_py`](https://github.com/preraulab/DYNAM-O_py) | MNE-based or scientific-Python workflows |
 
 Each is usable on its own. Below, there's a dedicated install section for
@@ -45,6 +45,7 @@ Are you in Python / MNE?                                   →  DYNAM-O_py (pydy
     Want it fast?                                          →  build dynamo_rs as a PyO3 wheel (auto-detected)
 
 Are you integrating Rust into your own pipeline?           →  DYNAM-O_rs (library)
+Want a native binary with no MATLAB/Python runtime?        →  DYNAM-O_rs CLI (`dynamo extract`)
 ```
 
 - **Most MATLAB users:** clone [`DYNAM-O_dev`](https://github.com/preraulab/DYNAM-O_dev), use `backend='rust'` (default).
@@ -249,6 +250,29 @@ dynamo_rs = { git = "https://github.com/preraulab/DYNAM-O_rs", branch = "rust-br
 ```
 
 Then `use dynamo_rs::...;` — see the public items in `src/lib.rs`.
+
+### 5. Build the standalone `dynamo` CLI (no MATLAB, no Python)
+
+```bash
+cargo build --release --bin dynamo
+./target/release/dynamo extract \
+    --spect  spect.npy  \
+    --stimes stimes.npy \
+    --sfreqs sfreqs.npy \
+    --out    stats.csv
+```
+
+Takes a pre-computed multitaper spectrogram (three `.npy` files — any
+numpy / MATLAB / Rust multitaper implementation will do) and writes a
+peak-stats CSV with the same columns as MATLAB's `stats_table`. Use
+`--help` to see all `ExtractParams` overrides (seg-time, merge-thresh,
+trim-vol, dur/bw filters, etc).
+
+Full EDF-to-CSV orchestration (multitaper + baseline + refine + histograms)
+is still roadmap; every individual stage already has a public Rust
+function, the CLI just needs stitching. See
+[`DYNAM-O_rs/README.md`](https://github.com/preraulab/DYNAM-O_rs/blob/rust-bridge/README.md)
+for the full module map.
 
 Detailed crate layout, consumer matrix, and API reference:
 [`DYNAM-O_rs/README.md`](https://github.com/preraulab/DYNAM-O_rs/blob/rust-bridge/README.md).
