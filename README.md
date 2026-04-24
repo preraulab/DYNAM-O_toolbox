@@ -148,7 +148,7 @@ Consent → stages *only* those files (not your unrelated edits), commits with a
 
 ```
 Are you writing MATLAB code or need the File Manager GUI?  →  DYNAM-O_dev (MATLAB)
-    Want it fast?                                          →  build the 'rust' backend (~4x speedup)
+    Want it fast?                                          →  build the 'rust' backend (~4x end-to-end, ~8x on extract)
     Just want the reference implementation?                →  'matlab' backend, no extra setup
 
 Are you in Python / MNE?                                   →  DYNAM-O_py (pydynamo)
@@ -166,7 +166,8 @@ Want a native binary with no MATLAB/Python runtime?        →  DYNAM-O_rs CLI (
 ## Install — MATLAB (`DYNAM-O_dev`)
 
 The MATLAB implementation has two backends: `'matlab'` (pure MATLAB, reference
-implementation) and `'rust'` (MEX wrappers around `dynamo_rs`, ~4× faster).
+implementation) and `'rust'` (MEX wrappers around `dynamo_rs`, ~4× faster
+end-to-end; ~8× on the extract stages alone).
 You can install step 1 only and use the `'matlab'` backend right away; the
 optional steps 2–3 add the Rust speed path.
 
@@ -230,10 +231,14 @@ runDYNAMO('segment', 'backend', 'rust')     % uses the compiled MEX
 runDYNAMO('segment', 'backend', 'matlab')   % falls back to pure MATLAB
 ```
 
-Expected: ~37 s wallclock for `'rust'` (full night, end-to-end incl. histograms
-+ parametric/spline fits + summary plot), ~125 s for `'matlab'`. Pure Rust
-extract stages (watershed + merge + trim + regionprops + refine) run in
-~14 s wallclock on an 8-core M-series — ~4× the pure-MATLAB path's ~60 s.
+Measured 2026-04-24 on an 8-core M-series, warm MATLAB R2025b, bundled
+night recording:
+- `backend='rust'`:   **36.7 s** end-to-end (extract 15.6 s, rest is
+  parametric/spline fits + summary plot + histograms + IO).
+- `backend='matlab'`: **149.9 s** end-to-end (extract 123.9 s, same
+  MATLAB-side downstream stages).
+- **4.08× total speedup**, **7.96×** on the Rust extract path alone.
+- Final peak-count parity: −0.94 % (Rust 36 312 vs MATLAB 36 656).
 
 Detailed API, options, and recipes:
 [`DYNAM-O_dev/README.md`](https://github.com/preraulab/DYNAM-O_dev/blob/rust-bridge/README.md).
