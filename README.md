@@ -230,7 +230,10 @@ runDYNAMO('segment', 'backend', 'rust')     % uses the compiled MEX
 runDYNAMO('segment', 'backend', 'matlab')   % falls back to pure MATLAB
 ```
 
-Expected: ~30 s wallclock for `'rust'` (full night), ~125 s for `'matlab'`.
+Expected: ~37 s wallclock for `'rust'` (full night, end-to-end incl. histograms
++ parametric/spline fits + summary plot), ~125 s for `'matlab'`. Pure Rust
+extract stages (watershed + merge + trim + regionprops + refine) run in
+~14 s wallclock on an 8-core M-series — ~4× the pure-MATLAB path's ~60 s.
 
 Detailed API, options, and recipes:
 [`DYNAM-O_dev/README.md`](https://github.com/preraulab/DYNAM-O_dev/blob/rust-bridge/README.md).
