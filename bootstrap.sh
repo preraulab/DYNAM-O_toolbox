@@ -50,23 +50,49 @@ confirm() {
     [[ "$yn" =~ ^[Yy] ]]
 }
 
-# ---------- 1. Clone sub-repos if missing ----------
+# ---------- 1. Ensure sub-repos exist AND are on the rust-bridge branch ----------
+#
+# Two ways a user gets here:
+#   (a) Fresh meta-repo clone (no submodules today) → sub-repo dirs don't
+#       exist yet. We clone each on rust-bridge.
+#   (b) Meta-repo with submodules (Part 3, future) → `git clone --recursive`
+#       has already populated the sub-repo dirs at whatever SHA the meta-repo
+#       pins. That SHA may not be on rust-bridge. We detect + offer to
+#       switch.
 BRANCH="rust-bridge"
 CLONE_BASE="https://github.com/preraulab"
 
-clone_if_missing() {
+align_subrepo() {
     local dir="$1" repo="$2"
+
     if [ -d "$dir/.git" ] || [ -f "$dir/.git" ]; then
-        ok "$dir present."
+        # Already present — verify branch.
+        local current
+        current="$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || echo 'DETACHED')"
+        if [ "$current" = "$BRANCH" ]; then
+            ok "$dir on $BRANCH."
+            git -C "$dir" submodule update --init --recursive >/dev/null 2>&1 || true
+        else
+            warn "$dir is on '$current' (expected '$BRANCH')."
+            if confirm "Fetch + check out $BRANCH in $dir?"; then
+                git -C "$dir" fetch origin "$BRANCH"
+                git -C "$dir" checkout "$BRANCH"
+                git -C "$dir" pull --ff-only origin "$BRANCH" || true
+                git -C "$dir" submodule update --init --recursive >/dev/null 2>&1 || true
+                ok "$dir now on $BRANCH."
+            else
+                warn "Leaving $dir on '$current'. Downstream builds may use stale code."
+            fi
+        fi
     else
         info "Cloning $dir (branch $BRANCH)..."
         git clone --recursive -b "$BRANCH" "$CLONE_BASE/$repo.git" "$dir"
     fi
 }
 
-clone_if_missing DYNAM-O_rs DYNAM-O_rs
-clone_if_missing DYNAMO_dev DYNAM-O_dev
-clone_if_missing DYNAM-O_py DYNAM-O_py
+align_subrepo DYNAM-O_rs DYNAM-O_rs
+align_subrepo DYNAMO_dev DYNAM-O_dev
+align_subrepo DYNAM-O_py DYNAM-O_py
 
 # ---------- 2. Rust toolchain ----------
 if ! command -v cargo >/dev/null 2>&1; then

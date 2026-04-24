@@ -24,31 +24,50 @@ each — and each can optionally use the `dynamo_rs` Rust core for speed.
 
 ## ⚡ One-command bootstrap (recommended)
 
-On a fresh checkout, run the bootstrap script for your platform. It clones
-the three sub-repos, installs Rust if missing, builds the Rust core + the
-standalone `dynamo` CLI, and (interactively) offers to build the MATLAB
-MEX wrappers and set up the Python venv for pydynamo:
+On a fresh machine, copy and run exactly one of the blocks below. Each
+handles everything end-to-end — clones the three sub-repos on the
+`rust-bridge` branch, installs Rust via rustup if missing, builds the
+Rust core + the standalone `dynamo` CLI, and (interactively) offers to
+build the MATLAB MEX wrappers and set up the Python venv for pydynamo.
 
-**macOS / Linux / WSL / Git-Bash:**
+### macOS / Linux / WSL / Git-Bash
+
+Requires only `git` and `curl` on PATH (rustup auto-installs on consent):
+
 ```bash
-git clone https://github.com/preraulab/DYNAM-O_toolbox.git
+git clone --recursive https://github.com/preraulab/DYNAM-O_toolbox.git
 cd DYNAM-O_toolbox
-./bootstrap.sh             # interactive — prompts for each optional step
-./bootstrap.sh --yes       # non-interactive
-./bootstrap.sh --rust-only # skip MATLAB + Python; just build Rust
+./bootstrap.sh
 ```
 
-**Windows (PowerShell):**
+Flags: `--yes` for non-interactive, `--rust-only` to skip MATLAB + Python.
+
+### Windows (PowerShell)
+
+Requires [Git for Windows](https://git-scm.com/download/win). PowerShell 5
+(built into Windows 10/11) or PowerShell 7 both work. Copy the whole block
+into a PowerShell prompt — the `-ExecutionPolicy Bypass` is needed because
+Windows blocks running unsigned local scripts by default:
+
 ```powershell
-git clone https://github.com/preraulab/DYNAM-O_toolbox.git
+git clone --recursive https://github.com/preraulab/DYNAM-O_toolbox.git
 cd DYNAM-O_toolbox
-.\bootstrap.ps1            # interactive
-.\bootstrap.ps1 -Yes       # non-interactive
-.\bootstrap.ps1 -RustOnly  # skip MATLAB + Python; just build Rust
+powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
 ```
 
-The script is **idempotent** — re-run it any time to pick up changes,
-rebuild after a pull, or add the MATLAB / Python pieces after the fact.
+Flags: `-Yes` for non-interactive, `-RustOnly` to skip MATLAB + Python,
+e.g. `powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Yes`.
+
+### What the script does
+
+- **Clones** any missing sub-repo (`DYNAM-O_rs`, `DYNAMO_dev`, `DYNAM-O_py`) on the `rust-bridge` branch. If a sub-repo is already present (e.g., from a prior `git clone --recursive` that pinned a different branch), it offers to fetch + check out `rust-bridge` so all three are aligned.
+- **Installs Rust** via rustup (prompts once for consent).
+- **Builds** `libdynamo_rs` and the `dynamo` CLI binary.
+- **Detects MATLAB** (`matlab` on PATH, or `/Applications/MATLAB*.app` on Mac / `C:\Program Files\MATLAB\*` on Windows). If found and you consent, runs `matlab -batch build_rust_mex` headless. If headless fails (usually another MATLAB session has the license), prints the copy-paste recipe for your existing MATLAB.
+- **Detects Python**. If found and you consent, creates a venv at `DYNAM-O_py/.venv`, installs `maturin`, builds the `dynamo_rs` Python extension into the venv, and `pip install -e` pydynamo itself.
+
+It's **idempotent** — re-run it after any `git pull` to rebuild, or to add the MATLAB / Python pieces later. Each step short-circuits when its output already exists.
+
 If anything fails, skip to the manual per-language sections below.
 
 > ### ⚠️ Branch note

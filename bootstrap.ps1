@@ -35,7 +35,14 @@ function Confirm-Step($prompt) {
     return ($yn -match '^[Yy]')
 }
 
-# ---------- 1. Clone sub-repos ----------
+# ---------- 1. Ensure sub-repos exist AND are on the rust-bridge branch ----------
+#
+# Two ways a user gets here:
+#   (a) Fresh meta-repo clone (no submodules today) -> sub-repo dirs don't
+#       exist yet. We clone each on rust-bridge.
+#   (b) Meta-repo with submodules (Part 3, future) -> 'git clone --recursive'
+#       already populated the sub-repo dirs at whatever SHA the meta-repo
+#       pins. That SHA may not be on rust-bridge. We detect + offer to switch.
 $branch = 'rust-bridge'
 $cloneBase = 'https://github.com/preraulab'
 $repos = @(
@@ -43,14 +50,33 @@ $repos = @(
     @{ Dir = 'DYNAMO_dev';  Repo = 'DYNAM-O_dev' },
     @{ Dir = 'DYNAM-O_py';  Repo = 'DYNAM-O_py' }
 )
-foreach ($r in $repos) {
-    if (Test-Path (Join-Path $r.Dir '.git')) {
-        OK "$($r.Dir) present."
+
+function Align-SubRepo($dir, $repo) {
+    if (Test-Path (Join-Path $dir '.git')) {
+        $current = (git -C $dir symbolic-ref --short HEAD 2>$null)
+        if (-not $current) { $current = 'DETACHED' }
+        if ($current -eq $branch) {
+            OK "$dir on $branch."
+            git -C $dir submodule update --init --recursive | Out-Null
+        } else {
+            Warn "$dir is on '$current' (expected '$branch')."
+            if (Confirm-Step "Fetch + check out $branch in $dir?") {
+                git -C $dir fetch origin $branch
+                git -C $dir checkout $branch
+                git -C $dir pull --ff-only origin $branch
+                git -C $dir submodule update --init --recursive | Out-Null
+                OK "$dir now on $branch."
+            } else {
+                Warn "Leaving $dir on '$current'. Downstream builds may use stale code."
+            }
+        }
     } else {
-        Info "Cloning $($r.Dir) (branch $branch)..."
-        git clone --recursive -b $branch "$cloneBase/$($r.Repo).git" $r.Dir
+        Info "Cloning $dir (branch $branch)..."
+        git clone --recursive -b $branch "$cloneBase/$repo.git" $dir
     }
 }
+
+foreach ($r in $repos) { Align-SubRepo $r.Dir $r.Repo }
 
 # ---------- 2. Rust toolchain ----------
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
