@@ -61,15 +61,16 @@ confirm() {
 #       switch.
 BRANCH="rust-bridge"
 # Inherit the clone protocol from the meta-repo's origin URL. A user who
-# cloned this repo via https://... gets HTTPS sub-repos; a user who cloned
-# via git@github.com:... gets SSH sub-repos. Matches the submodule relative-
-# URL pattern in DYNAMO_dev/.gitmodules so the whole toolbox uses one auth
-# path. Falls back to HTTPS if the meta-repo has no origin (e.g. user
-# downloaded a tarball).
+# cloned this repo via git@github.com:... gets SSH sub-repos; a user who
+# cloned via https://... gets HTTPS sub-repos. Matches the submodule
+# relative-URL pattern in DYNAMO_dev/.gitmodules so the whole toolbox
+# uses one auth path. Default when there's no clear protocol (e.g. user
+# downloaded a tarball): SSH — contributors are the primary audience
+# for this bootstrap and SSH skips the PAT-prompt on push.
 _ORIGIN_URL="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo '')"
 case "$_ORIGIN_URL" in
-    git@github.com:*) CLONE_BASE="git@github.com:preraulab" ;;
-    *)                CLONE_BASE="https://github.com/preraulab" ;;
+    https://github.com/*) CLONE_BASE="https://github.com/preraulab" ;;
+    *)                    CLONE_BASE="git@github.com:preraulab" ;;
 esac
 unset _ORIGIN_URL
 

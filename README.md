@@ -33,15 +33,16 @@ build the MATLAB MEX wrappers and set up the Python venv for pydynamo.
 ### macOS / Linux / WSL / Git-Bash
 
 Requires only `git` and `curl` on PATH (rustup auto-installs on consent).
-Pick HTTPS or SSH — the bootstrap detects which you used to clone this
-meta-repo and clones the three sub-repos the same way.
+**SSH is the default** — works best for lab contributors who will
+commit+push MEX or benchmark artifacts back. The bootstrap inherits
+whichever protocol you used to clone this meta-repo, so HTTPS works too.
 
 ```bash
-# HTTPS (default — no GitHub SSH key needed)
-git clone --recursive https://github.com/preraulab/DYNAM-O_toolbox.git
-
-# or SSH (if you have keys on GitHub — push-write for contributors)
+# SSH (default — needs a GitHub SSH key configured once)
 git clone --recursive git@github.com:preraulab/DYNAM-O_toolbox.git
+
+# or HTTPS (no SSH key needed; push requires a Personal Access Token)
+git clone --recursive https://github.com/preraulab/DYNAM-O_toolbox.git
 
 cd DYNAM-O_toolbox
 ./bootstrap.sh
@@ -49,20 +50,23 @@ cd DYNAM-O_toolbox
 
 Flags: `--yes` for non-interactive, `--rust-only` to skip MATLAB + Python.
 
-> **HTTPS vs SSH — which do I want?**
-> - **HTTPS** works without any setup. Read-only for public repos. Pushing
->   needs a GitHub Personal Access Token (set once via `git config
->   --global credential.helper store` + one `git push` that caches it).
-> - **SSH** works only after you've added a public key to GitHub
+> **SSH vs HTTPS — which do I want?**
+> - **SSH** is the contributor default. Needs a public key registered on
+>   GitHub once
 >   ([instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh)).
->   Push without any token prompt. Preferred for contributors who will
->   commit+push MEX or benchmark artifacts back.
+>   After that, cloning + pushing are both friction-free — no token
+>   prompts, no HTTPS cert quirks (see *Known per-platform gotchas*
+>   below for the RHEL ca-bundle issue that HTTPS hits).
+> - **HTTPS** works without any setup. Read-only for public repos is
+>   fine out of the box. Pushing needs a GitHub Personal Access Token
+>   (set once via `git config --global credential.helper store` + one
+>   `git push` that caches it).
 >
 > The **bootstrap script, sub-repo clones, and submodule URLs all inherit
 > the protocol you used for the meta-repo clone** — submodule URLs in
 > `DYNAMO_dev/.gitmodules` are relative (`../multitaper_toolbox.git`
-> style), so cloning over HTTPS gives HTTPS submodules and cloning over
-> SSH gives SSH submodules. No extra config required.
+> style), so cloning over SSH gives SSH submodules and cloning over
+> HTTPS gives HTTPS submodules. No extra config required.
 
 ### Windows (PowerShell)
 
@@ -72,11 +76,11 @@ into a PowerShell prompt — the `-ExecutionPolicy Bypass` is needed because
 Windows blocks running unsigned local scripts by default:
 
 ```powershell
-# HTTPS
-git clone --recursive https://github.com/preraulab/DYNAM-O_toolbox.git
-
-# or SSH
+# SSH (default)
 git clone --recursive git@github.com:preraulab/DYNAM-O_toolbox.git
+
+# or HTTPS
+git clone --recursive https://github.com/preraulab/DYNAM-O_toolbox.git
 
 cd DYNAM-O_toolbox
 powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
@@ -105,19 +109,19 @@ The bootstrap is a convenience wrapper — everything it does can be run by hand
 
 ```bash
 # 1. Clone each sub-repo WITH submodules on rust-bridge.
-#    Use the same protocol (HTTPS or SSH) you used for the meta-repo —
+#    Use the same protocol (SSH or HTTPS) you used for the meta-repo —
 #    submodule URLs inside each sub-repo are relative, so they'll inherit
 #    whichever protocol the parent uses.
 
-# --- HTTPS (no GitHub SSH key needed) ---
-git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_rs.git
-git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_dev.git DYNAMO_dev
-git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_py.git
-
-# --- or SSH (if you have keys on GitHub) ---
+# --- SSH (default — needs a GitHub SSH key configured) ---
 git clone --recursive -b rust-bridge git@github.com:preraulab/DYNAM-O_rs.git
 git clone --recursive -b rust-bridge git@github.com:preraulab/DYNAM-O_dev.git DYNAMO_dev
 git clone --recursive -b rust-bridge git@github.com:preraulab/DYNAM-O_py.git
+
+# --- or HTTPS (no SSH key needed) ---
+git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_rs.git
+git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_dev.git DYNAMO_dev
+git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_py.git
 
 # If --recursive didn't fully initialize the submodules (flaky network, etc.),
 # re-run inside each sub-repo:
