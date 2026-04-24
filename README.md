@@ -236,15 +236,15 @@ runDYNAMO('segment', 'backend', 'rust')     % uses the compiled MEX
 runDYNAMO('segment', 'backend', 'matlab')   % falls back to pure MATLAB
 ```
 
-Measured 2026-04-24 on an 8-core M-series, warm MATLAB R2025b, bundled
-night recording:
-- `backend='rust'`:   **~36.7 s** end-to-end (Rust extract ~15.6 s, rest
+Measured 2026-04-24 on an 8-core M3, warm MATLAB R2025b, bundled night
+recording (`benchmark_runDYNAMO` with warmup, 3-trial median):
+- `backend='rust'`:   **34.8 s** end-to-end (Rust extract 16.1 s; rest
   is parametric/spline fits + summary plot + MATLAB IO).
-- `backend='matlab'`: **~153 s** end-to-end, pure MATLAB (reference
-  implementation; only the bundled `multitaper_spectrogram_mex` is
-  compiled — histogram, extract, refine, mask all stay pure MATLAB).
-- **~4.2× total speedup**, **~8×** on the Rust extract path alone.
-- Final peak-count parity: −0.94 % (Rust 36 312 vs MATLAB 36 656).
+- `backend='matlab'`: **163.5 s** end-to-end, pure MATLAB (reference
+  implementation — only the bundled `multitaper_spectrogram_mex` is
+  compiled; histogram, extract, refine, mask all stay pure MATLAB).
+- **4.70× total speedup**, **9.0×** on the Rust extract path alone.
+- Final peak-count parity: −0.60 % (Rust 34 579 vs MATLAB 34 788).
 
 Detailed API, options, and recipes:
 [`DYNAM-O_dev/README.md`](https://github.com/preraulab/DYNAM-O_dev/blob/rust-bridge/README.md).
