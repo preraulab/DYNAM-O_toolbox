@@ -174,8 +174,21 @@ if ($matlab) {
                 if (-not $devBranch) { $devBranch = 'HEAD' }
                 $rsSha = (git -C (Join-Path $repoRoot 'DYNAM-O_rs') rev-parse --short HEAD 2>$null)
                 if (-not $rsSha) { $rsSha = 'unknown' }
-                foreach ($f in $changed) { git -C $devRoot add -- $f }
-                $msg = @"
+                # Branch safety: pre-built binaries should land on rust-bridge,
+                # not whatever branch the contributor happens to be on.
+                $continueMexPush = $true
+                if ($devBranch -ne 'rust-bridge') {
+                    Warn "DYNAMO_dev is on branch '$devBranch', not 'rust-bridge'."
+                    Warn "Platform binaries are normally committed to rust-bridge so the"
+                    Warn "whole team picks them up. Pushing to '$devBranch' may not be what you want."
+                    if (-not (Confirm-Step "Continue and push to '$devBranch' anyway?")) {
+                        Info 'Skipping commit — checkout rust-bridge first if you want to contribute binaries.'
+                        $continueMexPush = $false
+                    }
+                }
+                if ($continueMexPush) {
+                    foreach ($f in $changed) { git -C $devRoot add -- $f }
+                    $msg = @"
 chore: MEX binaries for $platform (dynamo_rs @ $rsSha)
 
 Pre-built artifacts committed from a bootstrap.ps1 run on $platform so
@@ -184,18 +197,39 @@ toolchain.
 
 dynamo_rs source SHA: $rsSha
 "@
-                git -C $devRoot commit -m $msg
-                if (Confirm-Step "Push to origin/$devBranch?") {
-                    git -C $devRoot push origin $devBranch
-                    if ($LASTEXITCODE -eq 0) {
-                        OK "Pushed MEX binaries to origin/$devBranch."
+                    git -C $devRoot commit -m $msg
+                    if (Confirm-Step "Push to origin/$devBranch?") {
+                        git -C $devRoot push origin $devBranch
+                        if ($LASTEXITCODE -eq 0) {
+                            OK "Pushed MEX binaries to origin/$devBranch."
+                        } else {
+                            Warn 'Push failed (no permission, network, or non-fast-forward).'
+                            Warn 'The commit is in your local DYNAMO_dev — push it manually when ready.'
+                        }
                     } else {
-                        Warn 'Push failed (no permission, network, or non-fast-forward).'
-                        Warn 'The commit is in your local DYNAMO_dev — push it manually when ready.'
+                        OK "Committed locally. Push with:  cd DYNAMO_dev; git push origin $devBranch"
                     }
-                } else {
-                    OK "Committed locally. Push with:  cd DYNAMO_dev; git push origin $devBranch"
                 }
+            }
+        }
+
+        # ---- 4b. Optional: run head-to-head benchmark on this machine ----
+        # After MEX is landed, capture a backend='rust' vs backend='matlab'
+        # timing + peak-count snapshot. benchmark_runDYNAMO('push','yes')
+        # writes its own JSON under rust_bridge/benchmarks/runs/ and
+        # commits+pushes it for us.
+        if (Confirm-Step "Run benchmark_runDYNAMO on 'night' and push the result JSON?") {
+            Info 'Running headless MATLAB benchmark — this takes ~3-6 minutes.'
+            $benchCmd = "addpath(genpath('$(Join-Path $repoRoot 'DYNAMO_dev')')); " +
+                        "cd('$(Join-Path $repoRoot 'DYNAMO_dev\rust_bridge')'); " +
+                        "benchmark_runDYNAMO('push','yes'); exit"
+            & $matlabPath -batch $benchCmd
+            if ($LASTEXITCODE -eq 0) {
+                OK 'Benchmark complete. JSON written under DYNAMO_dev\rust_bridge\benchmarks\runs\.'
+            } else {
+                Warn 'Benchmark run failed — see the output above.'
+                Warn 'You can retry manually with:'
+                Warn "    powershell -File $(Join-Path $repoRoot 'DYNAMO_dev\rust_bridge\run_benchmark.ps1')"
             }
         }
     }

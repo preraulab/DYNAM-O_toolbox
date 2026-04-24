@@ -132,8 +132,15 @@ if $RUST_ONLY; then
 fi
 
 # ---------- 4. Optional: MATLAB MEX wrappers ----------
+# Search order: PATH first, then standard install locations per platform.
+# macOS:   /Applications/MATLAB_R*.app
+# Linux:   /usr/local/MATLAB/R*, /opt/MATLAB/R*
+# (Windows path handled by bootstrap.ps1.)
 MATLAB_BIN=""
-for candidate in matlab /Applications/MATLAB*.app/bin/matlab; do
+for candidate in matlab \
+                 /Applications/MATLAB*.app/bin/matlab \
+                 /usr/local/MATLAB/R*/bin/matlab \
+                 /opt/MATLAB/R*/bin/matlab; do
     if command -v "$candidate" >/dev/null 2>&1; then
         MATLAB_BIN="$(command -v "$candidate")"; break
     fi
@@ -177,24 +184,60 @@ if [ -n "$MATLAB_BIN" ]; then
                 PLATFORM="$(uname -sm)"
                 DEV_BRANCH="$(git -C "$REPO_ROOT/DYNAMO_dev" symbolic-ref --short HEAD 2>/dev/null || echo 'HEAD')"
                 RS_SHA="$(git -C "$REPO_ROOT/DYNAM-O_rs" rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
-                # Stage only the binaries we just built — not unrelated modifications.
-                (cd "$REPO_ROOT/DYNAMO_dev" && echo "$CHANGED" | xargs git add --)
-                (cd "$REPO_ROOT/DYNAMO_dev" && git commit -m "chore: MEX binaries for $PLATFORM (dynamo_rs @ $RS_SHA)
+                # Branch safety: pre-built binaries should land on rust-bridge,
+                # not whatever branch the contributor happens to be on.
+                if [ "$DEV_BRANCH" != "rust-bridge" ]; then
+                    warn "DYNAMO_dev is on branch '$DEV_BRANCH', not 'rust-bridge'."
+                    warn "Platform binaries are normally committed to rust-bridge so the"
+                    warn "whole team picks them up. Pushing to '$DEV_BRANCH' may not be what you want."
+                    if ! confirm "Continue and push to '$DEV_BRANCH' anyway?"; then
+                        info "Skipping commit — checkout rust-bridge first if you want to contribute binaries."
+                        continue_mex_push=false
+                    else
+                        continue_mex_push=true
+                    fi
+                else
+                    continue_mex_push=true
+                fi
+                if $continue_mex_push; then
+                    # Stage only the binaries we just built — not unrelated modifications.
+                    (cd "$REPO_ROOT/DYNAMO_dev" && echo "$CHANGED" | xargs git add --)
+                    (cd "$REPO_ROOT/DYNAMO_dev" && git commit -m "chore: MEX binaries for $PLATFORM (dynamo_rs @ $RS_SHA)
 
 Pre-built artifacts committed from a bootstrap.sh run on $PLATFORM so end
 users on the same platform can clone + run without a MATLAB/Rust toolchain.
 
 dynamo_rs source SHA: $RS_SHA")
-                if confirm "Push to origin/$DEV_BRANCH?"; then
-                    if git -C "$REPO_ROOT/DYNAMO_dev" push origin "$DEV_BRANCH"; then
-                        ok "Pushed MEX binaries to origin/$DEV_BRANCH."
+                    if confirm "Push to origin/$DEV_BRANCH?"; then
+                        if git -C "$REPO_ROOT/DYNAMO_dev" push origin "$DEV_BRANCH"; then
+                            ok "Pushed MEX binaries to origin/$DEV_BRANCH."
+                        else
+                            warn "Push failed (no permission, network, or non-fast-forward)."
+                            warn "The commit is in your local DYNAMO_dev — push it manually when ready."
+                        fi
                     else
-                        warn "Push failed (no permission, network, or non-fast-forward)."
-                        warn "The commit is in your local DYNAMO_dev — push it manually when ready."
+                        ok "Committed locally. Push with:  (cd DYNAMO_dev && git push origin $DEV_BRANCH)"
                     fi
-                else
-                    ok "Committed locally. Push with:  (cd DYNAMO_dev && git push origin $DEV_BRANCH)"
                 fi
+            fi
+        fi
+
+        # ---- 4b. Optional: run head-to-head benchmark on this machine ----
+        # After MEX is landed, it's useful to capture a backend='rust' vs
+        # backend='matlab' timing + peak-count snapshot. The benchmark
+        # script writes its own JSON under rust_bridge/benchmarks/runs/
+        # and can commit+push itself via its 'push' argument.
+        if confirm "Run benchmark_runDYNAMO on 'night' and push the result JSON?"; then
+            info "Running headless MATLAB benchmark — this takes ~3-6 minutes."
+            if "$MATLAB_BIN" -nodisplay -batch "\
+                addpath(genpath('$REPO_ROOT/DYNAMO_dev')); \
+                cd('$REPO_ROOT/DYNAMO_dev/rust_bridge'); \
+                benchmark_runDYNAMO('push','yes'); exit" 2>&1 | tail -30; then
+                ok "Benchmark complete. JSON written under DYNAMO_dev/rust_bridge/benchmarks/runs/."
+            else
+                warn "Benchmark run failed — check the tail output above."
+                warn "You can retry manually with:"
+                warn "    bash $REPO_ROOT/DYNAMO_dev/rust_bridge/run_benchmark.sh"
             fi
         fi
     fi
