@@ -65,10 +65,26 @@ e.g. `powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Yes`.
 - **Builds** `libdynamo_rs` and the `dynamo` CLI binary.
 - **Detects MATLAB** (`matlab` on PATH, or `/Applications/MATLAB*.app` on Mac / `C:\Program Files\MATLAB\*` on Windows). If found and you consent, runs `matlab -batch build_rust_mex` headless. If headless fails (usually another MATLAB session has the license), prints the copy-paste recipe for your existing MATLAB.
 - **Detects Python**. If found and you consent, creates a venv at `DYNAM-O_py/.venv`, installs `maturin`, builds the `dynamo_rs` Python extension into the venv, and `pip install -e` pydynamo itself.
+- **Offers to commit + push** the freshly-built MEX + shared-library artifacts back to `DYNAMO_dev/rust_bridge/`, tagged with platform name and dynamo_rs source SHA. See *Share pre-built binaries* below.
 
 It's **idempotent** — re-run it after any `git pull` to rebuild, or to add the MATLAB / Python pieces later. Each step short-circuits when its output already exists.
 
 If anything fails, skip to the manual per-language sections below.
+
+### Share pre-built binaries (contributors)
+
+The MATLAB `'rust'` backend needs a MEX binary for *each* platform it runs on (`.mexmaca64` for Apple Silicon, `.mexmaci64` for Intel Mac, `.mexa64` for Linux, `.mexw64` for Windows). Each MEX also needs `libdynamo_rs.{dylib,so,dll}` sitting next to it — `build_rust_mex` now copies the shared library into `rust_bridge/` and embeds a loader-relative rpath, so the pair is fully relocatable once committed.
+
+Strategy: **each platform-owner runs the bootstrap once, consents to commit + push their binaries, and then anyone on that same platform can clone-and-run with no MATLAB/Rust toolchain.**
+
+When the bootstrap finishes building MEX, it diffs `DYNAMO_dev/rust_bridge/` against HEAD, shows you the new `.mex*` + shared-library files, and offers:
+```
+? Commit + push these to the current branch so other users don't need to rebuild? [Y/n]
+```
+
+Consent → stages *only* those files (not your unrelated edits), commits with a message like `chore: MEX binaries for Darwin arm64 (dynamo_rs @ 759e5f9)`, and pushes to `origin/rust-bridge` (or whatever branch you're on).
+
+**Decline** if you're on a throwaway branch, lack push permission, or need to inspect the diff first. The commit is always made locally; the push is a second prompt. You can always push manually later with `cd DYNAMO_dev && git push origin rust-bridge`.
 
 > ### ⚠️ Branch note
 >

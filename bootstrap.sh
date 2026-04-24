@@ -138,14 +138,58 @@ done
 
 if [ -n "$MATLAB_BIN" ]; then
     info "MATLAB detected: $MATLAB_BIN"
+    MEX_BUILT=false
     if confirm "Build MATLAB MEX wrappers (requires an active license)?"; then
         info "Invoking MATLAB headless — this may take ~30 s..."
         if "$MATLAB_BIN" -batch "cd('$REPO_ROOT/DYNAMO_dev/rust_bridge'); build_rust_mex" 2>&1 | tail -20; then
             ok "MEX wrappers built in DYNAMO_dev/rust_bridge/."
+            MEX_BUILT=true
         else
             warn "MATLAB headless build failed — often a license-checkout issue when another MATLAB session is open."
             warn "Inside your running MATLAB, run:"
             warn "    cd('$REPO_ROOT/DYNAMO_dev/rust_bridge'); build_rust_mex"
+        fi
+    fi
+
+    # --- Offer to commit + push the freshly-built platform-specific binaries ---
+    # Goal: contributors on each platform push their MEX + shared-library
+    # artifacts back to rust-bridge so end users can clone-and-run without
+    # needing MATLAB or a Rust toolchain themselves.
+    if $MEX_BUILT; then
+        MEX_DIR="$REPO_ROOT/DYNAMO_dev/rust_bridge"
+        CHANGED=$(git -C "$REPO_ROOT/DYNAMO_dev" status --porcelain -- rust_bridge \
+                  | awk '{print $NF}' \
+                  | grep -E '\.(mexa64|mexmaci64|mexmaca64|mexw64|dylib|so|dll)$' || true)
+        if [ -z "$CHANGED" ]; then
+            info "No MEX / shared-lib changes detected under rust_bridge/ — nothing to commit."
+        else
+            echo
+            info "Freshly-built platform binaries under DYNAMO_dev/rust_bridge/:"
+            echo "$CHANGED" | sed 's/^/    /'
+            echo
+            if confirm "Commit + push these to the current branch so other users don't need to rebuild?"; then
+                PLATFORM="$(uname -sm)"
+                DEV_BRANCH="$(git -C "$REPO_ROOT/DYNAMO_dev" symbolic-ref --short HEAD 2>/dev/null || echo 'HEAD')"
+                RS_SHA="$(git -C "$REPO_ROOT/DYNAM-O_rs" rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
+                # Stage only the binaries we just built — not unrelated modifications.
+                (cd "$REPO_ROOT/DYNAMO_dev" && echo "$CHANGED" | xargs git add --)
+                (cd "$REPO_ROOT/DYNAMO_dev" && git commit -m "chore: MEX binaries for $PLATFORM (dynamo_rs @ $RS_SHA)
+
+Pre-built artifacts committed from a bootstrap.sh run on $PLATFORM so end
+users on the same platform can clone + run without a MATLAB/Rust toolchain.
+
+dynamo_rs source SHA: $RS_SHA")
+                if confirm "Push to origin/$DEV_BRANCH?"; then
+                    if git -C "$REPO_ROOT/DYNAMO_dev" push origin "$DEV_BRANCH"; then
+                        ok "Pushed MEX binaries to origin/$DEV_BRANCH."
+                    else
+                        warn "Push failed (no permission, network, or non-fast-forward)."
+                        warn "The commit is in your local DYNAMO_dev — push it manually when ready."
+                    fi
+                else
+                    ok "Committed locally. Push with:  (cd DYNAMO_dev && git push origin $DEV_BRANCH)"
+                fi
+            fi
         fi
     fi
 else

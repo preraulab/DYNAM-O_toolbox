@@ -127,22 +127,75 @@ if ($null -eq $matlab) {
 if ($matlab) {
     $matlabPath = if ($matlab -is [System.IO.FileInfo]) { $matlab.FullName } else { $matlab.Source }
     Info "MATLAB detected: $matlabPath"
+    $mexBuilt = $false
     if (Confirm-Step "Build MATLAB MEX wrappers (requires an active license)?") {
         $mexDir = Join-Path $repoRoot 'DYNAMO_dev\rust_bridge'
         Info "Invoking MATLAB headless — this may take ~30 s..."
-        $args = @('-batch', "cd('$mexDir'); build_rust_mex")
-        & $matlabPath @args
+        & $matlabPath -batch "cd('$mexDir'); build_rust_mex"
         if ($LASTEXITCODE -eq 0) {
             OK "MEX wrappers built in $mexDir."
+            $mexBuilt = $true
         } else {
             Warn "MATLAB headless build failed — often a license-checkout issue when another MATLAB session is open."
             Warn "Inside your running MATLAB, run:"
             Warn "    cd('$mexDir'); build_rust_mex"
         }
     }
+
+    # --- Offer to commit + push the freshly-built platform-specific binaries ---
+    # Goal: contributors on each platform push their MEX + shared-library
+    # artifacts back to rust-bridge so end users can clone-and-run without
+    # needing MATLAB or a Rust toolchain themselves.
+    if ($mexBuilt) {
+        $devRoot = Join-Path $repoRoot 'DYNAMO_dev'
+        $status = git -C $devRoot status --porcelain -- rust_bridge
+        $pattern = '\.(mexa64|mexmaci64|mexmaca64|mexw64|dylib|so|dll)$'
+        $changed = @()
+        foreach ($line in $status) {
+            $file = ($line -replace '^...', '').Trim()
+            if ($file -match $pattern) { $changed += $file }
+        }
+        if ($changed.Count -eq 0) {
+            Info 'No MEX / shared-lib changes detected under rust_bridge/ — nothing to commit.'
+        } else {
+            Write-Host ''
+            Info 'Freshly-built platform binaries under DYNAMO_dev\rust_bridge\:'
+            $changed | ForEach-Object { Write-Host "    $_" }
+            Write-Host ''
+            if (Confirm-Step "Commit + push these to the current branch so other users don't need to rebuild?") {
+                $platform = "Windows $env:PROCESSOR_ARCHITECTURE"
+                $devBranch = (git -C $devRoot symbolic-ref --short HEAD 2>$null)
+                if (-not $devBranch) { $devBranch = 'HEAD' }
+                $rsSha = (git -C (Join-Path $repoRoot 'DYNAM-O_rs') rev-parse --short HEAD 2>$null)
+                if (-not $rsSha) { $rsSha = 'unknown' }
+                foreach ($f in $changed) { git -C $devRoot add -- $f }
+                $msg = @"
+chore: MEX binaries for $platform (dynamo_rs @ $rsSha)
+
+Pre-built artifacts committed from a bootstrap.ps1 run on $platform so
+end users on the same platform can clone + run without a MATLAB/Rust
+toolchain.
+
+dynamo_rs source SHA: $rsSha
+"@
+                git -C $devRoot commit -m $msg
+                if (Confirm-Step "Push to origin/$devBranch?") {
+                    git -C $devRoot push origin $devBranch
+                    if ($LASTEXITCODE -eq 0) {
+                        OK "Pushed MEX binaries to origin/$devBranch."
+                    } else {
+                        Warn 'Push failed (no permission, network, or non-fast-forward).'
+                        Warn 'The commit is in your local DYNAMO_dev — push it manually when ready.'
+                    }
+                } else {
+                    OK "Committed locally. Push with:  cd DYNAMO_dev; git push origin $devBranch"
+                }
+            }
+        }
+    }
 } else {
-    Info "MATLAB not found on PATH."
-    Info "If / when you install MATLAB, open it and run:"
+    Info 'MATLAB not found on PATH.'
+    Info 'If / when you install MATLAB, open it and run:'
     Info "    cd('$(Join-Path $repoRoot 'DYNAMO_dev\rust_bridge')'); build_rust_mex"
 }
 
