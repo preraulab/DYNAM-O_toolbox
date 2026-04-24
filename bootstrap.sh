@@ -60,7 +60,18 @@ confirm() {
 #       pins. That SHA may not be on rust-bridge. We detect + offer to
 #       switch.
 BRANCH="rust-bridge"
-CLONE_BASE="https://github.com/preraulab"
+# Inherit the clone protocol from the meta-repo's origin URL. A user who
+# cloned this repo via https://... gets HTTPS sub-repos; a user who cloned
+# via git@github.com:... gets SSH sub-repos. Matches the submodule relative-
+# URL pattern in DYNAMO_dev/.gitmodules so the whole toolbox uses one auth
+# path. Falls back to HTTPS if the meta-repo has no origin (e.g. user
+# downloaded a tarball).
+_ORIGIN_URL="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo '')"
+case "$_ORIGIN_URL" in
+    git@github.com:*) CLONE_BASE="git@github.com:preraulab" ;;
+    *)                CLONE_BASE="https://github.com/preraulab" ;;
+esac
+unset _ORIGIN_URL
 
 align_subrepo() {
     local dir="$1" repo="$2"

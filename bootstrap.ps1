@@ -44,7 +44,16 @@ function Confirm-Step($prompt) {
 #       already populated the sub-repo dirs at whatever SHA the meta-repo
 #       pins. That SHA may not be on rust-bridge. We detect + offer to switch.
 $branch = 'rust-bridge'
-$cloneBase = 'https://github.com/preraulab'
+# Inherit the clone protocol from the meta-repo's origin URL. HTTPS ->
+# HTTPS sub-repos; SSH -> SSH sub-repos. Matches the submodule relative-
+# URL pattern in DYNAMO_dev/.gitmodules so the whole toolbox uses one
+# auth path. Falls back to HTTPS if the meta-repo has no origin.
+$originUrl = (git -C $repoRoot remote get-url origin 2>$null)
+if ($originUrl -match '^git@github\.com:') {
+    $cloneBase = 'git@github.com:preraulab'
+} else {
+    $cloneBase = 'https://github.com/preraulab'
+}
 $repos = @(
     @{ Dir = 'DYNAM-O_rs';  Repo = 'DYNAM-O_rs' },
     @{ Dir = 'DYNAMO_dev';  Repo = 'DYNAM-O_dev' },
