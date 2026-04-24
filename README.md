@@ -20,6 +20,37 @@ common algorithm and Rust core:
 Each is usable on its own. Below, there's a dedicated install section for
 each — and each can optionally use the `dynamo_rs` Rust core for speed.
 
+---
+
+## ⚡ One-command bootstrap (recommended)
+
+On a fresh checkout, run the bootstrap script for your platform. It clones
+the three sub-repos, installs Rust if missing, builds the Rust core + the
+standalone `dynamo` CLI, and (interactively) offers to build the MATLAB
+MEX wrappers and set up the Python venv for pydynamo:
+
+**macOS / Linux / WSL / Git-Bash:**
+```bash
+git clone https://github.com/preraulab/DYNAM-O_toolbox.git
+cd DYNAM-O_toolbox
+./bootstrap.sh             # interactive — prompts for each optional step
+./bootstrap.sh --yes       # non-interactive
+./bootstrap.sh --rust-only # skip MATLAB + Python; just build Rust
+```
+
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/preraulab/DYNAM-O_toolbox.git
+cd DYNAM-O_toolbox
+.\bootstrap.ps1            # interactive
+.\bootstrap.ps1 -Yes       # non-interactive
+.\bootstrap.ps1 -RustOnly  # skip MATLAB + Python; just build Rust
+```
+
+The script is **idempotent** — re-run it any time to pick up changes,
+rebuild after a pull, or add the MATLAB / Python pieces after the fact.
+If anything fails, skip to the manual per-language sections below.
+
 > ### ⚠️ Branch note
 >
 > All of the install recipes below clone the **`rust-bridge`** branch of each
