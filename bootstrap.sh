@@ -109,7 +109,7 @@ align_subrepo() {
 }
 
 align_subrepo DYNAM-O_rs DYNAM-O_rs
-align_subrepo DYNAMO_dev DYNAM-O_dev
+align_subrepo DYNAMO_dev DYNAM-O
 align_subrepo DYNAM-O_py DYNAM-O_py
 
 # ---------- 2. Rust toolchain ----------

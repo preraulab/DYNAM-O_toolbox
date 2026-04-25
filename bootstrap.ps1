@@ -58,7 +58,7 @@ if ($originUrl -match '^https://github\.com/') {
 }
 $repos = @(
     @{ Dir = 'DYNAM-O_rs';  Repo = 'DYNAM-O_rs' },
-    @{ Dir = 'DYNAMO_dev';  Repo = 'DYNAM-O_dev' },
+    @{ Dir = 'DYNAMO_dev';  Repo = 'DYNAM-O' },
     @{ Dir = 'DYNAM-O_py';  Repo = 'DYNAM-O_py' }
 )
 
