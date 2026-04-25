@@ -63,7 +63,7 @@ BRANCH="rust-bridge"
 # Inherit the clone protocol from the meta-repo's origin URL. A user who
 # cloned this repo via git@github.com:... gets SSH sub-repos; a user who
 # cloned via https://... gets HTTPS sub-repos. Matches the submodule
-# relative-URL pattern in DYNAMO_dev/.gitmodules so the whole toolbox
+# relative-URL pattern in DYNAM-O/.gitmodules so the whole toolbox
 # uses one auth path. Default when there's no clear protocol (e.g. user
 # downloaded a tarball): SSH — contributors are the primary audience
 # for this bootstrap and SSH skips the PAT-prompt on push.
@@ -109,7 +109,7 @@ align_subrepo() {
 }
 
 align_subrepo DYNAM-O_rs DYNAM-O_rs
-align_subrepo DYNAMO_dev DYNAM-O
+align_subrepo DYNAM-O DYNAM-O
 align_subrepo DYNAM-O_py DYNAM-O_py
 
 # ---------- 2. Rust toolchain ----------
@@ -166,13 +166,13 @@ if [ -n "$MATLAB_BIN" ]; then
     MEX_BUILT=false
     if confirm "Build MATLAB MEX wrappers (requires an active license)?"; then
         info "Invoking MATLAB headless — this may take ~30 s..."
-        if "$MATLAB_BIN" -batch "cd('$REPO_ROOT/DYNAMO_dev/rust_bridge'); build_rust_mex" 2>&1 | tail -20; then
-            ok "MEX wrappers built in DYNAMO_dev/rust_bridge/."
+        if "$MATLAB_BIN" -batch "cd('$REPO_ROOT/DYNAM-O/rust_bridge'); build_rust_mex" 2>&1 | tail -20; then
+            ok "MEX wrappers built in DYNAM-O/rust_bridge/."
             MEX_BUILT=true
         else
             warn "MATLAB headless build failed — often a license-checkout issue when another MATLAB session is open."
             warn "Inside your running MATLAB, run:"
-            warn "    cd('$REPO_ROOT/DYNAMO_dev/rust_bridge'); build_rust_mex"
+            warn "    cd('$REPO_ROOT/DYNAM-O/rust_bridge'); build_rust_mex"
         fi
     fi
 
@@ -181,25 +181,25 @@ if [ -n "$MATLAB_BIN" ]; then
     # artifacts back to rust-bridge so end users can clone-and-run without
     # needing MATLAB or a Rust toolchain themselves.
     if $MEX_BUILT; then
-        MEX_DIR="$REPO_ROOT/DYNAMO_dev/rust_bridge"
-        CHANGED=$(git -C "$REPO_ROOT/DYNAMO_dev" status --porcelain -- rust_bridge \
+        MEX_DIR="$REPO_ROOT/DYNAM-O/rust_bridge"
+        CHANGED=$(git -C "$REPO_ROOT/DYNAM-O" status --porcelain -- rust_bridge \
                   | awk '{print $NF}' \
                   | grep -E '\.(mexa64|mexmaci64|mexmaca64|mexw64|dylib|so|dll)$' || true)
         if [ -z "$CHANGED" ]; then
             info "No MEX / shared-lib changes detected under rust_bridge/ — nothing to commit."
         else
             echo
-            info "Freshly-built platform binaries under DYNAMO_dev/rust_bridge/:"
+            info "Freshly-built platform binaries under DYNAM-O/rust_bridge/:"
             echo "$CHANGED" | sed 's/^/    /'
             echo
             if confirm "Commit + push these to the current branch so other users don't need to rebuild?"; then
                 PLATFORM="$(uname -sm)"
-                DEV_BRANCH="$(git -C "$REPO_ROOT/DYNAMO_dev" symbolic-ref --short HEAD 2>/dev/null || echo 'HEAD')"
+                DEV_BRANCH="$(git -C "$REPO_ROOT/DYNAM-O" symbolic-ref --short HEAD 2>/dev/null || echo 'HEAD')"
                 RS_SHA="$(git -C "$REPO_ROOT/DYNAM-O_rs" rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
                 # Branch safety: pre-built binaries should land on rust-bridge,
                 # not whatever branch the contributor happens to be on.
                 if [ "$DEV_BRANCH" != "rust-bridge" ]; then
-                    warn "DYNAMO_dev is on branch '$DEV_BRANCH', not 'rust-bridge'."
+                    warn "DYNAM-O is on branch '$DEV_BRANCH', not 'rust-bridge'."
                     warn "Platform binaries are normally committed to rust-bridge so the"
                     warn "whole team picks them up. Pushing to '$DEV_BRANCH' may not be what you want."
                     if ! confirm "Continue and push to '$DEV_BRANCH' anyway?"; then
@@ -213,22 +213,22 @@ if [ -n "$MATLAB_BIN" ]; then
                 fi
                 if $continue_mex_push; then
                     # Stage only the binaries we just built — not unrelated modifications.
-                    (cd "$REPO_ROOT/DYNAMO_dev" && echo "$CHANGED" | xargs git add --)
-                    (cd "$REPO_ROOT/DYNAMO_dev" && git commit -m "chore: MEX binaries for $PLATFORM (dynamo_rs @ $RS_SHA)
+                    (cd "$REPO_ROOT/DYNAM-O" && echo "$CHANGED" | xargs git add --)
+                    (cd "$REPO_ROOT/DYNAM-O" && git commit -m "chore: MEX binaries for $PLATFORM (dynamo_rs @ $RS_SHA)
 
 Pre-built artifacts committed from a bootstrap.sh run on $PLATFORM so end
 users on the same platform can clone + run without a MATLAB/Rust toolchain.
 
 dynamo_rs source SHA: $RS_SHA")
                     if confirm "Push to origin/$DEV_BRANCH?"; then
-                        if git -C "$REPO_ROOT/DYNAMO_dev" push origin "$DEV_BRANCH"; then
+                        if git -C "$REPO_ROOT/DYNAM-O" push origin "$DEV_BRANCH"; then
                             ok "Pushed MEX binaries to origin/$DEV_BRANCH."
                         else
                             warn "Push failed (no permission, network, or non-fast-forward)."
-                            warn "The commit is in your local DYNAMO_dev — push it manually when ready."
+                            warn "The commit is in your local DYNAM-O — push it manually when ready."
                         fi
                     else
-                        ok "Committed locally. Push with:  (cd DYNAMO_dev && git push origin $DEV_BRANCH)"
+                        ok "Committed locally. Push with:  (cd DYNAM-O && git push origin $DEV_BRANCH)"
                     fi
                 fi
             fi
@@ -242,21 +242,21 @@ dynamo_rs source SHA: $RS_SHA")
         if confirm "Run benchmark_runDYNAMO on 'night' and push the result JSON?"; then
             info "Running headless MATLAB benchmark — this takes ~3-6 minutes."
             if "$MATLAB_BIN" -nodisplay -batch "\
-                addpath(genpath('$REPO_ROOT/DYNAMO_dev')); \
-                cd('$REPO_ROOT/DYNAMO_dev/rust_bridge'); \
+                addpath(genpath('$REPO_ROOT/DYNAM-O')); \
+                cd('$REPO_ROOT/DYNAM-O/rust_bridge'); \
                 benchmark_runDYNAMO('push','yes'); exit" 2>&1 | tail -30; then
-                ok "Benchmark complete. JSON written under DYNAMO_dev/rust_bridge/benchmarks/runs/."
+                ok "Benchmark complete. JSON written under DYNAM-O/rust_bridge/benchmarks/runs/."
             else
                 warn "Benchmark run failed — check the tail output above."
                 warn "You can retry manually with:"
-                warn "    bash $REPO_ROOT/DYNAMO_dev/rust_bridge/run_benchmark.sh"
+                warn "    bash $REPO_ROOT/DYNAM-O/rust_bridge/run_benchmark.sh"
             fi
         fi
     fi
 else
     info "MATLAB not found on PATH."
     info "If / when you install MATLAB, open it and run:"
-    info "    cd('$REPO_ROOT/DYNAMO_dev/rust_bridge'); build_rust_mex"
+    info "    cd('$REPO_ROOT/DYNAM-O/rust_bridge'); build_rust_mex"
 fi
 
 # ---------- 5. Optional: Python venv + pydynamo ----------
@@ -298,7 +298,7 @@ echo
 echo "Next steps — pick one:"
 echo
 echo "  MATLAB:"
-echo "    cd DYNAMO_dev && matlab -r \"runDYNAMO('segment')\""
+echo "    cd DYNAM-O && matlab -r \"runDYNAMO('segment')\""
 echo
 echo "  Python (pydynamo):"
 echo "    source DYNAM-O_py/.venv/bin/activate"
