@@ -546,6 +546,45 @@ merge (pixel sets match 100 %); it shifts ~270 peaks across the
 bandwidth/duration filter cutoffs. SO-power histogram cosine similarity vs
 MATLAB is 0.999, SO-phase 0.996 — visually indistinguishable.
 
+### Recommended sampling frequency: 100 Hz
+
+DYNAM-O analyzes **0–30 Hz**, so 100 Hz Nyquist is well above anything
+the pipeline cares about. Resampling higher-rate recordings (128 / 200 /
+256 / 500 / 1000 Hz) **down** to 100 Hz before analysis gives a ~2×
+end-to-end speedup with **zero analytical change** (the antialiased
+polyphase filter is lossless for sleep oscillations).
+
+The mechanism: the multitaper-spectrogram NFFT is
+`2^nextpow2(Fs / mtm_dsfreqs)` with default `mtm_dsfreqs = 0.1`. The
+first NFFT bucket boundary above 100 Hz sits at exactly **Fs = 102.4 Hz**
+(`10·Fs = 1024 = 2¹⁰`). Anything above that doubles NFFT and typically
+pushes the spectrogram past CPU L3 cache, so every downstream stage
+(extract / baseline / mask / watershed) takes a further 2–3× memory-
+bandwidth hit on top of the FFT cost.
+
+| Native Fs | NFFT | Spectrogram cost vs 100 Hz |
+|---:|---:|---:|
+| ≤ 100 | 1024 | 1× |
+| 128, 200 | 2048 | ~2.2× |
+| 256 | 4096 | ~4.6× |
+| 500, 512 | 8192 | ~9.3× |
+| 1000 | 16384 | ~18× |
+
+The MATLAB **FileManager** has Resample = ON at 100 Hz **by default** —
+no action needed for typical use. For scripted callers:
+
+```matlab
+[p, q] = rat(100 / Fs);
+data   = resample(data, p, q);
+Fs     = 100;
+```
+
+If you legitimately need spectral content above 50 Hz (e.g., gamma analysis
+beyond DYNAM-O's range), keep the native Fs and accept the ~2× cost —
+but for the canonical sleep-oscillation workflow (slow oscillations,
+spindles, alpha/beta), 100 Hz is strictly faster and analytically
+identical.
+
 ---
 
 ## Background and motivation
