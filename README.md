@@ -129,11 +129,6 @@ git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_py.git
 (cd DYNAM-O_dev && git submodule update --init --recursive)
 (cd DYNAM-O_py && git submodule update --init --recursive)
 
-# Existing checkouts from before 2026-04-24: DYNAM-O_dev's submodule URLs
-# were switched from hardcoded git@github.com:... to relative (../X.git)
-# so HTTPS clones work. If your checkout predates that change, sync once:
-(cd DYNAM-O_dev && git submodule sync && git submodule update --init --recursive)
-
 # 2. Rust toolchain (skip if `cargo --version` already works)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
