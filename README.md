@@ -287,8 +287,6 @@ optional steps 2–3 add the Rust speed path.
 
 ```bash
 git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_dev.git
-cd DYNAM-O_dev
-git submodule update --init --recursive
 ```
 
 The `--recursive` is needed — the MATLAB toolbox vendors helper repos
