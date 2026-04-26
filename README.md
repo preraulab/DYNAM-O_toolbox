@@ -64,7 +64,7 @@ Flags: `--yes` for non-interactive, `--rust-only` to skip MATLAB + Python.
 >
 > The **bootstrap script, sub-repo clones, and submodule URLs all inherit
 > the protocol you used for the meta-repo clone** — submodule URLs in
-> `DYNAMO_dev/.gitmodules` are relative (`../multitaper_toolbox.git`
+> `DYNAM-O_dev/.gitmodules` are relative (`../multitaper_toolbox.git`
 > style), so cloning over SSH gives SSH submodules and cloning over
 > HTTPS gives HTTPS submodules. No extra config required.
 
@@ -91,12 +91,12 @@ e.g. `powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Yes`.
 
 ### What the script does
 
-- **Clones** any missing sub-repo (`DYNAM-O_rs`, `DYNAMO_dev`, `DYNAM-O_py`) on the `rust-bridge` branch, *with submodules* — each `git clone --recursive -b rust-bridge …` + a defensive `git submodule update --init --recursive` pass so the nested helpers (CSSuicontrols, multitaper_spectrogram, nanstats, erpplot, dynamo_helpers, etc.) land correctly even on flaky networks. If a sub-repo is already present (e.g., from a prior `git clone --recursive` that pinned a different branch), it offers to fetch + check out `rust-bridge` so all three are aligned.
+- **Clones** any missing sub-repo (`DYNAM-O_rs`, `DYNAM-O_dev`, `DYNAM-O_py`) on the `rust-bridge` branch, *with submodules* — each `git clone --recursive -b rust-bridge …` + a defensive `git submodule update --init --recursive` pass so the nested helpers (CSSuicontrols, multitaper_spectrogram, nanstats, erpplot, dynamo_helpers, etc.) land correctly even on flaky networks. If a sub-repo is already present (e.g., from a prior `git clone --recursive` that pinned a different branch), it offers to fetch + check out `rust-bridge` so all three are aligned.
 - **Installs Rust** via rustup (prompts once for consent).
 - **Builds** `libdynamo_rs` and the `dynamo` CLI binary.
 - **Detects MATLAB** across macOS (`/Applications/MATLAB*.app`), Linux (`/usr/local/MATLAB/R*`, `/opt/MATLAB/R*`), and Windows (`C:\Program Files\MATLAB\*`), plus the `matlab` command on `PATH`. If found and you consent, runs `matlab -batch build_rust_mex` headless. If headless fails (usually another MATLAB session has the license), prints the copy-paste recipe for your existing MATLAB.
-- **Offers to commit + push** the freshly-built MEX + shared-library artifacts back to `DYNAMO_dev/rust_bridge/`, tagged with platform name and dynamo_rs source SHA. Refuses to push to anything other than `rust-bridge` without explicit confirmation. See *Share pre-built binaries* below.
-- **Offers to run `benchmark_runDYNAMO`** on the full night fixture (both backends, warmup + timed). Writes a per-run JSON under `DYNAMO_dev/rust_bridge/benchmarks/runs/` encoding hostname + os + arch + CPU + cores + RAM + MATLAB version + both repo SHAs + per-backend timings + peak counts, then commits and pushes just that one file. Takes ~3–6 min; skippable. See *Benchmarking* below.
+- **Offers to commit + push** the freshly-built MEX + shared-library artifacts back to `DYNAM-O_dev/rust_bridge/`, tagged with platform name and dynamo_rs source SHA. Refuses to push to anything other than `rust-bridge` without explicit confirmation. See *Share pre-built binaries* below.
+- **Offers to run `benchmark_runDYNAMO`** on the full night fixture (both backends, warmup + timed). Writes a per-run JSON under `DYNAM-O_dev/rust_bridge/benchmarks/runs/` encoding hostname + os + arch + CPU + cores + RAM + MATLAB version + both repo SHAs + per-backend timings + peak counts, then commits and pushes just that one file. Takes ~3–6 min; skippable. See *Benchmarking* below.
 - **Detects Python**. If found and you consent, creates a venv at `DYNAM-O_py/.venv`, installs `maturin`, builds the `dynamo_rs` Python extension into the venv, and `pip install -e` pydynamo itself.
 
 It's **idempotent** — re-run it after any `git pull` to rebuild, or to add the MATLAB / Python pieces later. Each step short-circuits when its output already exists.
@@ -115,24 +115,24 @@ The bootstrap is a convenience wrapper — everything it does can be run by hand
 
 # --- SSH (default — needs a GitHub SSH key configured) ---
 git clone --recursive -b rust-bridge git@github.com:preraulab/DYNAM-O_rs.git
-git clone --recursive -b rust-bridge git@github.com:preraulab/DYNAM-O_dev.git DYNAMO_dev
+git clone --recursive -b rust-bridge git@github.com:preraulab/DYNAM-O_dev.git
 git clone --recursive -b rust-bridge git@github.com:preraulab/DYNAM-O_py.git
 
 # --- or HTTPS (no SSH key needed) ---
 git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_rs.git
-git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_dev.git DYNAMO_dev
+git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_dev.git
 git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_py.git
 
 # If --recursive didn't fully initialize the submodules (flaky network, etc.),
 # re-run inside each sub-repo:
 (cd DYNAM-O_rs && git submodule update --init --recursive)
-(cd DYNAMO_dev && git submodule update --init --recursive)
+(cd DYNAM-O_dev && git submodule update --init --recursive)
 (cd DYNAM-O_py && git submodule update --init --recursive)
 
-# Existing checkouts from before 2026-04-24: DYNAMO_dev's submodule URLs
+# Existing checkouts from before 2026-04-24: DYNAM-O_dev's submodule URLs
 # were switched from hardcoded git@github.com:... to relative (../X.git)
 # so HTTPS clones work. If your checkout predates that change, sync once:
-(cd DYNAMO_dev && git submodule sync && git submodule update --init --recursive)
+(cd DYNAM-O_dev && git submodule sync && git submodule update --init --recursive)
 
 # 2. Rust toolchain (skip if `cargo --version` already works)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -142,7 +142,7 @@ source "$HOME/.cargo/env"
 (cd DYNAM-O_rs/rust && cargo build --release && cargo build --release --bin dynamo)
 
 # 4. MATLAB MEX — inside MATLAB, not the shell
-#    (cd DYNAMO_dev/rust_bridge; build_rust_mex)
+#    (cd DYNAM-O_dev/rust_bridge; build_rust_mex)
 
 # 5. Python venv + pydynamo
 cd DYNAM-O_py
@@ -168,18 +168,18 @@ The MATLAB `'rust'` backend needs a MEX binary for *each* platform it runs on (`
 
 Strategy: **each platform-owner runs the bootstrap once, consents to commit + push their binaries, and then anyone on that same platform can clone-and-run with no MATLAB/Rust toolchain.**
 
-When the bootstrap finishes building MEX, it diffs `DYNAMO_dev/rust_bridge/` against HEAD, shows you the new `.mex*` + shared-library files, and offers:
+When the bootstrap finishes building MEX, it diffs `DYNAM-O_dev/rust_bridge/` against HEAD, shows you the new `.mex*` + shared-library files, and offers:
 ```
 ? Commit + push these to the current branch so other users don't need to rebuild? [Y/n]
 ```
 
 Consent → stages *only* those files (not your unrelated edits), commits with a message like `chore: MEX binaries for Darwin arm64 (dynamo_rs @ 759e5f9)`, and pushes to `origin/rust-bridge`. The bootstrap refuses to commit binaries to any branch other than `rust-bridge` without explicit override — prevents accidentally landing platform artifacts on `master`.
 
-**Decline** if you're on a throwaway branch, lack push permission, or need to inspect the diff first. The commit is always made locally; the push is a second prompt. You can always push manually later with `cd DYNAMO_dev && git push origin rust-bridge`.
+**Decline** if you're on a throwaway branch, lack push permission, or need to inspect the diff first. The commit is always made locally; the push is a second prompt. You can always push manually later with `cd DYNAM-O_dev && git push origin rust-bridge`.
 
 ### Benchmarking
 
-After the MEX step, the bootstrap offers to run `benchmark_runDYNAMO('night')` head-to-head on **both** backends — pure-MATLAB reference vs Rust MEX — and commits the resulting JSON under `DYNAMO_dev/rust_bridge/benchmarks/runs/`. The file captures:
+After the MEX step, the bootstrap offers to run `benchmark_runDYNAMO('night')` head-to-head on **both** backends — pure-MATLAB reference vs Rust MEX — and commits the resulting JSON under `DYNAM-O_dev/rust_bridge/benchmarks/runs/`. The file captures:
 
 - Hostname, OS / OS version, architecture, CPU model, cores, RAM
 - MATLAB version, both repo SHAs (+ `dirty` flag if uncommitted)
@@ -192,11 +192,11 @@ If bootstrap's in-line invocation fails (rare — usually a license issue), you 
 
 ```bash
 # macOS / Linux
-bash DYNAMO_dev/rust_bridge/run_benchmark.sh          # defaults: night, both backends
-bash DYNAMO_dev/rust_bridge/run_benchmark.sh segment rust   # faster sanity check
+bash DYNAM-O_dev/rust_bridge/run_benchmark.sh          # defaults: night, both backends
+bash DYNAM-O_dev/rust_bridge/run_benchmark.sh segment rust   # faster sanity check
 
 # Windows
-powershell -ExecutionPolicy Bypass -File DYNAMO_dev\rust_bridge\run_benchmark.ps1
+powershell -ExecutionPolicy Bypass -File DYNAM-O_dev\rust_bridge\run_benchmark.ps1
 ```
 
 Both wrappers launch `matlab -nodisplay -batch` so the benchmark runs without loading the MATLAB desktop / Qt / CEF — needed as a workaround for the MATLAB R2025b + macOS 26 CEF font SIGSEGV that takes down long interactive runs. On Linux / Windows the headless invocation is equally safe and avoids consuming a desktop license slot.
@@ -206,7 +206,7 @@ The benchmark defaults assume warm-up is desired (discards one untimed run per b
 View aggregated results:
 
 ```matlab
-cd DYNAMO_dev/rust_bridge
+cd DYNAM-O_dev/rust_bridge
 benchmark_summarize
 ```
 
@@ -216,7 +216,7 @@ Or export to CSV:
 benchmark_summarize('csv_out', '/tmp/dynamo_bench.csv')
 ```
 
-See [`DYNAMO_dev/rust_bridge/benchmarks/README.md`](https://github.com/preraulab/DYNAM-O_dev/blob/rust-bridge/rust_bridge/benchmarks/README.md) for the full JSON schema and contribution flow.
+See [`DYNAM-O_dev/rust_bridge/benchmarks/README.md`](https://github.com/preraulab/DYNAM-O_dev/blob/rust-bridge/rust_bridge/benchmarks/README.md) for the full JSON schema and contribution flow.
 
 > ### ⚠️ Branch note
 >
