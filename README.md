@@ -273,262 +273,7 @@ Want a native binary with no MATLAB/Python runtime?        →  DYNAM-O_rs CLI (
 - **Most MATLAB users:** clone [`DYNAM-O_dev`](https://github.com/preraulab/DYNAM-O_dev), use `backend='rust'` (default).
 - **Most Python users:** clone [`DYNAM-O_py`](https://github.com/preraulab/DYNAM-O_py), let it pick up `dynamo_rs` automatically when present.
 
----
-
-## Install — MATLAB (`DYNAM-O_dev`)
-
-The MATLAB implementation has two backends: `'matlab'` (pure MATLAB, reference
-implementation) and `'rust'` (MEX wrappers around `dynamo_rs`, ~4× faster
-end-to-end; ~8× on the extract stages alone).
-You can install step 1 only and use the `'matlab'` backend right away; the
-optional steps 2–3 add the Rust speed path.
-
-### 1. Clone
-
-```bash
-git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_dev.git
-```
-
-The `--recursive` is needed — the MATLAB toolbox vendors helper repos
-(multitaper spectrogram, plotting utilities, etc.) as git submodules.
-
-Verify with:
-
-```matlab
-runDYNAMO('segment')      % runs the bundled 90-minute example on 'matlab' backend
-```
-
-### 2. (Optional) Compile the Rust core for the `'rust'` backend
-
-Requires the [Rust toolchain](https://rustup.rs):
-
-```bash
-# either clone the Rust repo as a sibling of DYNAM-O_dev…
-cd ..
-git clone -b rust-bridge https://github.com/preraulab/DYNAM-O_rs.git
-cd DYNAM-O_rs/rust
-cargo build --release
-
-# …or, if you cloned the meta-repo, the sibling already exists
-```
-
-This produces `libdynamo_rs.{dylib,so,dll}` under `target/release/` and
-regenerates `include/dynamo_rs.h`. One-time; rebuild only when the Rust
-source changes.
-
-### 3. (Optional) Compile the MEX wrappers
-
-Requires a C compiler configured in MATLAB (`mex -setup C`):
-
-```matlab
-cd <workspace>/DYNAM-O_dev/rust_bridge
-build_rust_mex
-```
-
-Produces four platform-specific MEX files in `rust_bridge/`:
-`extract_tfpeaks_mex.*`, `mask_spectrogram_mex.*`, `refine_peaks_mex.*`,
-`tfpeak_histogram_mex.*`. Extension per platform: `.mexmaca64` (Apple
-Silicon), `.mexmaci64` (Intel Mac), `.mexa64` (Linux), `.mexw64` (Windows).
-
-Full per-platform build guide, troubleshooting, and cross-platform
-distribution notes:
-[`DYNAM-O_dev/rust_bridge/README.md`](https://github.com/preraulab/DYNAM-O_dev/blob/rust-bridge/rust_bridge/README.md).
-
-### 4. Verify
-
-```matlab
-runDYNAMO('segment', 'backend', 'rust')     % uses the compiled MEX
-runDYNAMO('segment', 'backend', 'matlab')   % falls back to pure MATLAB
-```
-
-Measured 2026-04-24 on an 8-core M3, warm MATLAB R2025b, bundled night
-recording (`benchmark_runDYNAMO` with warmup, 3-trial median):
-- `backend='rust'`:   **34.8 s** end-to-end (Rust extract 16.1 s; rest
-  is parametric/spline fits + summary plot + MATLAB IO).
-- `backend='matlab'`: **163.5 s** end-to-end, pure MATLAB (reference
-  implementation — only the bundled `multitaper_spectrogram_mex` is
-  compiled; histogram, extract, refine, mask all stay pure MATLAB).
-- **4.70× total speedup**, **9.0×** on the Rust extract path alone.
-- Final peak-count parity: −0.60 % (Rust 34 579 vs MATLAB 34 788).
-
-Detailed API, options, and recipes:
-[`DYNAM-O_dev/README.md`](https://github.com/preraulab/DYNAM-O_dev/blob/rust-bridge/README.md).
-
----
-
-## Install — Python (`DYNAM-O_py` / pydynamo)
-
-Pydynamo runs end-to-end in Python. The Rust core is optional but strongly
-recommended — with `dynamo_rs` installed, pydynamo delegates watershed,
-merge, trim, and histograms to Rust for roughly a 1.5–10× speedup depending
-on stage. Without Rust, pydynamo falls back to scipy / scikit-image
-implementations.
-
-### Prerequisites
-
-- Python ≥ 3.9
-- For the Rust speed path: the [Rust toolchain](https://rustup.rs) and
-  [maturin](https://www.maturin.rs) (`pip install maturin`).
-
-### 1. Clone
-
-```bash
-git clone -b rust-bridge https://github.com/preraulab/DYNAM-O_py.git
-cd DYNAM-O_py
-```
-
-### 2. Set up a virtualenv
-
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install --upgrade pip maturin
-```
-
-### 3. (Optional) Compile the Rust core as a Python wheel
-
-Requires the [Rust toolchain](https://rustup.rs):
-
-```bash
-# from a sibling clone of DYNAM-O_rs
-cd ..
-git clone -b rust-bridge https://github.com/preraulab/DYNAM-O_rs.git
-cd DYNAM-O_rs/rust
-maturin develop --release --features python
-# installs `dynamo_rs` into your active virtualenv
-```
-
-The `--features python` flag enables the PyO3 bindings in the crate; the
-non-Python Rust consumers (MATLAB MEX, standalone Rust) don't need it.
-
-### 4. Install pydynamo + its multitaper sibling
-
-```bash
-# pydynamo itself
-cd <workspace>/DYNAM-O_py
-pip install -e .
-
-# multitaper_rs sibling (provides the MT spectrogram Rust extension)
-cd ..
-git clone https://github.com/preraulab/multitaper_toolbox.git
-maturin develop --release -m multitaper_toolbox/src/python/rust/pyproject.toml
-```
-
-### 5. Verify
-
-```bash
-python -c "import pydynamo; print(pydynamo.__version__)"
-pytest tests/
-```
-
-Detailed usage, stage-by-stage accuracy tables, and side-by-side MATLAB
-comparisons:
-[`DYNAM-O_py/README.md`](https://github.com/preraulab/DYNAM-O_py/blob/rust-bridge/README.md).
-
----
-
-## Install — Rust (`DYNAM-O_rs`)
-
-Standalone build of the pure-Rust kernel. Useful if you want to integrate
-`dynamo_rs` into your own Rust / C / Python project.
-
-### Prerequisites
-
-- [Rust toolchain](https://rustup.rs) (≥ 1.70)
-
-### 1. Clone
-
-```bash
-git clone -b rust-bridge https://github.com/preraulab/DYNAM-O_rs.git
-cd DYNAM-O_rs/rust
-```
-
-### 2. Build
-
-Three target shapes are controlled by the crate type + feature flags:
-
-```bash
-# Rust library (rlib) + C library (cdylib + staticlib), no Python
-cargo build --release
-
-# PyO3 Python extension (requires maturin and a Python venv)
-maturin build --release --features python
-# or, for in-place development:
-maturin develop --release --features python
-```
-
-`cargo build --release` produces:
-
-- `target/release/libdynamo_rs.{dylib,so,a}` (macOS / Linux; `.dll` + `.dll.lib` on Windows).
-- `include/dynamo_rs.h` — regenerated on each build via `build.rs` + `cbindgen`.
-
-MEX wrappers in [`DYNAM-O_dev/rust_bridge/`](https://github.com/preraulab/DYNAM-O_dev/tree/rust-bridge/rust_bridge) link against these artifacts at build time.
-
-### 3. Regenerate the C header manually (rarely needed)
-
-```bash
-cargo run --bin cbindgen -- --output include/dynamo_rs.h
-```
-
-### 4. Use from Rust
-
-Add to your `Cargo.toml` as a path or git dep:
-
-```toml
-[dependencies]
-dynamo_rs = { git = "https://github.com/preraulab/DYNAM-O_rs", branch = "rust-bridge" }
-```
-
-Then `use dynamo_rs::...;` — see the public items in `src/lib.rs`.
-
-### 5. Build the standalone `dynamo` CLI (no MATLAB, no Python)
-
-```bash
-cargo build --release --bin dynamo
-./target/release/dynamo extract \
-    --spect  spect.npy  \
-    --stimes stimes.npy \
-    --sfreqs sfreqs.npy \
-    --out    stats.csv
-```
-
-Takes a pre-computed multitaper spectrogram (three `.npy` files — any
-numpy / MATLAB / Rust multitaper implementation will do) and writes a
-peak-stats CSV with the same columns as MATLAB's `stats_table`. Use
-`--help` to see all `ExtractParams` overrides (seg-time, merge-thresh,
-trim-vol, dur/bw filters, etc).
-
-Full EDF-to-CSV orchestration (multitaper + baseline + refine + histograms)
-is still roadmap; every individual stage already has a public Rust
-function, the CLI just needs stitching. See
-[`DYNAM-O_rs/README.md`](https://github.com/preraulab/DYNAM-O_rs/blob/rust-bridge/README.md)
-for the full module map.
-
-Detailed crate layout, consumer matrix, and API reference:
-[`DYNAM-O_rs/README.md`](https://github.com/preraulab/DYNAM-O_rs/blob/rust-bridge/README.md).
-
----
-
-## Overview
-
-The primary goal of DYNAM-O is to characterize the multidimensional dynamics
-of spindle-like transient oscillations in the sleep EEG spectrogram. The
-pipeline extracts time-frequency peaks (TF-peaks) and their properties,
-visualizes distributions of TF-peak features, and conducts statistical
-tests to gain insights into sleep physiology.
-
-Four pipeline parts:
-
-1. **TF-peak identification** — extract transient oscillation events from a multitaper spectrogram using a watershed-based algorithm.
-2. **Feature computation** — compute microscopic (geometry, location) and macroscopic (sleep stage, SO-power, SO-phase) properties per peak.
-3. **Feature histograms** — encode overnight distributions of TF-peak properties as 2D SO-power and SO-phase histograms, with optional parametric and spline dimensionality reduction.
-4. **Statistical testing** — whole-histogram and mode-based group comparisons with FDR correction and permutation testing.
-
-The pipeline runs autonomously on any single-channel electrophysiological
-recording.
-
----
-
-## Performance comparison
+### Performance comparison
 
 Full-night example recording (~8.4 h, MATLAB reference = 34 788 peaks):
 
@@ -582,6 +327,259 @@ beyond DYNAM-O's range), keep the native Fs and accept the ~2× cost —
 but for the canonical sleep-oscillation workflow (slow oscillations,
 spindles, alpha/beta), 100 Hz is strictly faster and analytically
 identical.
+
+---
+
+## Separate installations
+
+If you only want one of the three pieces (e.g. just MATLAB, or just Python), the per-package recipes below do exactly what `bootstrap.sh` would do for that one — clone the sub-repo, install its toolchain, build.
+
+### • MATLAB (`DYNAM-O_dev`)
+
+The MATLAB implementation has two backends: `'matlab'` (pure MATLAB, reference
+implementation) and `'rust'` (MEX wrappers around `dynamo_rs`, ~4× faster
+end-to-end; ~8× on the extract stages alone).
+You can install step 1 only and use the `'matlab'` backend right away; the
+optional steps 2–3 add the Rust speed path.
+
+#### 1. Clone
+
+```bash
+git clone --recursive -b rust-bridge https://github.com/preraulab/DYNAM-O_dev.git
+```
+
+The `--recursive` is needed — the MATLAB toolbox vendors helper repos
+(multitaper spectrogram, plotting utilities, etc.) as git submodules.
+
+Verify with:
+
+```matlab
+runDYNAMO('segment')      % runs the bundled 90-minute example on 'matlab' backend
+```
+
+#### 2. (Optional) Compile the Rust core for the `'rust'` backend
+
+Requires the [Rust toolchain](https://rustup.rs):
+
+```bash
+# either clone the Rust repo as a sibling of DYNAM-O_dev…
+cd ..
+git clone -b rust-bridge https://github.com/preraulab/DYNAM-O_rs.git
+cd DYNAM-O_rs/rust
+cargo build --release
+
+# …or, if you cloned the meta-repo, the sibling already exists
+```
+
+This produces `libdynamo_rs.{dylib,so,dll}` under `target/release/` and
+regenerates `include/dynamo_rs.h`. One-time; rebuild only when the Rust
+source changes.
+
+#### 3. (Optional) Compile the MEX wrappers
+
+Requires a C compiler configured in MATLAB (`mex -setup C`):
+
+```matlab
+cd <workspace>/DYNAM-O_dev/rust_bridge
+build_rust_mex
+```
+
+Produces four platform-specific MEX files in `rust_bridge/`:
+`extract_tfpeaks_mex.*`, `mask_spectrogram_mex.*`, `refine_peaks_mex.*`,
+`tfpeak_histogram_mex.*`. Extension per platform: `.mexmaca64` (Apple
+Silicon), `.mexmaci64` (Intel Mac), `.mexa64` (Linux), `.mexw64` (Windows).
+
+Full per-platform build guide, troubleshooting, and cross-platform
+distribution notes:
+[`DYNAM-O_dev/rust_bridge/README.md`](https://github.com/preraulab/DYNAM-O_dev/blob/rust-bridge/rust_bridge/README.md).
+
+#### 4. Verify
+
+```matlab
+runDYNAMO('segment', 'backend', 'rust')     % uses the compiled MEX
+runDYNAMO('segment', 'backend', 'matlab')   % falls back to pure MATLAB
+```
+
+Measured 2026-04-24 on an 8-core M3, warm MATLAB R2025b, bundled night
+recording (`benchmark_runDYNAMO` with warmup, 3-trial median):
+- `backend='rust'`:   **34.8 s** end-to-end (Rust extract 16.1 s; rest
+  is parametric/spline fits + summary plot + MATLAB IO).
+- `backend='matlab'`: **163.5 s** end-to-end, pure MATLAB (reference
+  implementation — only the bundled `multitaper_spectrogram_mex` is
+  compiled; histogram, extract, refine, mask all stay pure MATLAB).
+- **4.70× total speedup**, **9.0×** on the Rust extract path alone.
+- Final peak-count parity: −0.60 % (Rust 34 579 vs MATLAB 34 788).
+
+Detailed API, options, and recipes:
+[`DYNAM-O_dev/README.md`](https://github.com/preraulab/DYNAM-O_dev/blob/rust-bridge/README.md).
+
+### • Python (`DYNAM-O_py` / pydynamo)
+
+Pydynamo runs end-to-end in Python. The Rust core is optional but strongly
+recommended — with `dynamo_rs` installed, pydynamo delegates watershed,
+merge, trim, and histograms to Rust for roughly a 1.5–10× speedup depending
+on stage. Without Rust, pydynamo falls back to scipy / scikit-image
+implementations.
+
+#### Prerequisites
+
+- Python ≥ 3.9
+- For the Rust speed path: the [Rust toolchain](https://rustup.rs) and
+  [maturin](https://www.maturin.rs) (`pip install maturin`).
+
+#### 1. Clone
+
+```bash
+git clone -b rust-bridge https://github.com/preraulab/DYNAM-O_py.git
+cd DYNAM-O_py
+```
+
+#### 2. Set up a virtualenv
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip maturin
+```
+
+#### 3. (Optional) Compile the Rust core as a Python wheel
+
+Requires the [Rust toolchain](https://rustup.rs):
+
+```bash
+# from a sibling clone of DYNAM-O_rs
+cd ..
+git clone -b rust-bridge https://github.com/preraulab/DYNAM-O_rs.git
+cd DYNAM-O_rs/rust
+maturin develop --release --features python
+# installs `dynamo_rs` into your active virtualenv
+```
+
+The `--features python` flag enables the PyO3 bindings in the crate; the
+non-Python Rust consumers (MATLAB MEX, standalone Rust) don't need it.
+
+#### 4. Install pydynamo + its multitaper sibling
+
+```bash
+# pydynamo itself
+cd <workspace>/DYNAM-O_py
+pip install -e .
+
+# multitaper_rs sibling (provides the MT spectrogram Rust extension)
+cd ..
+git clone https://github.com/preraulab/multitaper_toolbox.git
+maturin develop --release -m multitaper_toolbox/src/python/rust/pyproject.toml
+```
+
+#### 5. Verify
+
+```bash
+python -c "import pydynamo; print(pydynamo.__version__)"
+pytest tests/
+```
+
+Detailed usage, stage-by-stage accuracy tables, and side-by-side MATLAB
+comparisons:
+[`DYNAM-O_py/README.md`](https://github.com/preraulab/DYNAM-O_py/blob/rust-bridge/README.md).
+
+### • Rust (`DYNAM-O_rs`)
+
+Standalone build of the pure-Rust kernel. Useful if you want to integrate
+`dynamo_rs` into your own Rust / C / Python project.
+
+#### Prerequisites
+
+- [Rust toolchain](https://rustup.rs) (≥ 1.70)
+
+#### 1. Clone
+
+```bash
+git clone -b rust-bridge https://github.com/preraulab/DYNAM-O_rs.git
+cd DYNAM-O_rs/rust
+```
+
+#### 2. Build
+
+Three target shapes are controlled by the crate type + feature flags:
+
+```bash
+# Rust library (rlib) + C library (cdylib + staticlib), no Python
+cargo build --release
+
+# PyO3 Python extension (requires maturin and a Python venv)
+maturin build --release --features python
+# or, for in-place development:
+maturin develop --release --features python
+```
+
+`cargo build --release` produces:
+
+- `target/release/libdynamo_rs.{dylib,so,a}` (macOS / Linux; `.dll` + `.dll.lib` on Windows).
+- `include/dynamo_rs.h` — regenerated on each build via `build.rs` + `cbindgen`.
+
+MEX wrappers in [`DYNAM-O_dev/rust_bridge/`](https://github.com/preraulab/DYNAM-O_dev/tree/rust-bridge/rust_bridge) link against these artifacts at build time.
+
+#### 3. Regenerate the C header manually (rarely needed)
+
+```bash
+cargo run --bin cbindgen -- --output include/dynamo_rs.h
+```
+
+#### 4. Use from Rust
+
+Add to your `Cargo.toml` as a path or git dep:
+
+```toml
+[dependencies]
+dynamo_rs = { git = "https://github.com/preraulab/DYNAM-O_rs", branch = "rust-bridge" }
+```
+
+Then `use dynamo_rs::...;` — see the public items in `src/lib.rs`.
+
+#### 5. Build the standalone `dynamo` CLI (no MATLAB, no Python)
+
+```bash
+cargo build --release --bin dynamo
+./target/release/dynamo extract \
+    --spect  spect.npy  \
+    --stimes stimes.npy \
+    --sfreqs sfreqs.npy \
+    --out    stats.csv
+```
+
+Takes a pre-computed multitaper spectrogram (three `.npy` files — any
+numpy / MATLAB / Rust multitaper implementation will do) and writes a
+peak-stats CSV with the same columns as MATLAB's `stats_table`. Use
+`--help` to see all `ExtractParams` overrides (seg-time, merge-thresh,
+trim-vol, dur/bw filters, etc).
+
+Full EDF-to-CSV orchestration (multitaper + baseline + refine + histograms)
+is still roadmap; every individual stage already has a public Rust
+function, the CLI just needs stitching. See
+[`DYNAM-O_rs/README.md`](https://github.com/preraulab/DYNAM-O_rs/blob/rust-bridge/README.md)
+for the full module map.
+
+Detailed crate layout, consumer matrix, and API reference:
+[`DYNAM-O_rs/README.md`](https://github.com/preraulab/DYNAM-O_rs/blob/rust-bridge/README.md).
+
+---
+
+## DYNAM-O Toolbox Overview
+
+The primary goal of DYNAM-O is to characterize the multidimensional dynamics
+of spindle-like transient oscillations in the sleep EEG spectrogram. The
+pipeline extracts time-frequency peaks (TF-peaks) and their properties,
+visualizes distributions of TF-peak features, and conducts statistical
+tests to gain insights into sleep physiology.
+
+Four pipeline parts:
+
+1. **TF-peak identification** — extract transient oscillation events from a multitaper spectrogram using a watershed-based algorithm.
+2. **Feature computation** — compute microscopic (geometry, location) and macroscopic (sleep stage, SO-power, SO-phase) properties per peak.
+3. **Feature histograms** — encode overnight distributions of TF-peak properties as 2D SO-power and SO-phase histograms, with optional parametric and spline dimensionality reduction.
+4. **Statistical testing** — whole-histogram and mode-based group comparisons with FDR correction and permutation testing.
+
+The pipeline runs autonomously on any single-channel electrophysiological
+recording.
 
 ---
 
