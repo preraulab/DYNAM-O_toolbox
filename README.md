@@ -39,10 +39,10 @@ whichever protocol you used to clone this meta-repo, so HTTPS works too.
 
 ```bash
 # SSH (default — needs a GitHub SSH key configured once)
-git clone --recursive git@github.com:preraulab/DYNAM-O_toolbox.git
+git clone git@github.com:preraulab/DYNAM-O_toolbox.git
 
 # or HTTPS (no SSH key needed; push requires a Personal Access Token)
-git clone --recursive https://github.com/preraulab/DYNAM-O_toolbox.git
+git clone https://github.com/preraulab/DYNAM-O_toolbox.git
 
 cd DYNAM-O_toolbox
 ./bootstrap.sh
@@ -77,10 +77,10 @@ Windows blocks running unsigned local scripts by default:
 
 ```powershell
 # SSH (default)
-git clone --recursive git@github.com:preraulab/DYNAM-O_toolbox.git
+git clone git@github.com:preraulab/DYNAM-O_toolbox.git
 
 # or HTTPS
-git clone --recursive https://github.com/preraulab/DYNAM-O_toolbox.git
+git clone https://github.com/preraulab/DYNAM-O_toolbox.git
 
 cd DYNAM-O_toolbox
 powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
