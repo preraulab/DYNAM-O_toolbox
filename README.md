@@ -213,17 +213,21 @@ benchmark_summarize('csv_out', '/tmp/dynamo_bench.csv')
 
 See [`DYNAM-O_dev/rust_bridge/benchmarks/README.md`](https://github.com/preraulab/DYNAM-O_dev/blob/rust-bridge/rust_bridge/benchmarks/README.md) for the full JSON schema and contribution flow.
 
-> ### ⚠️ Branch note
->
-> All of the install recipes below clone the **`rust-bridge`** branch of each
-> sub-repo. That's where the current backend refactor, Rust core fixes, and
-> cross-repo coordination live. Default branches (`master`) will catch up
-> once `rust-bridge` is merged in each sub-repo.
->
-> If you forget the `-b rust-bridge` flag, MATLAB won't have a `'backend'`
-> option, the Rust core will use the older `expand_labels_bfs` border fill
-> (~+2 % peak-count drift vs MATLAB), and the README links in this repo
-> will point at paths that don't exist yet on the default branch.
+### Performance comparison
+
+Full-night example recording (~8.4 h, MATLAB reference = 34 788 peaks):
+
+| Implementation | Backend | Wallclock (Apple M3, 8-core) | Peak count | vs MATLAB |
+|---|---|---:|---:|---:|
+| **MATLAB** | `'matlab'` | ~125 s | 34 788 | reference |
+| **MATLAB** | `'rust'` *(default)* | **~30 s** | 34 511 | −0.80 % |
+| **Python** (pydynamo) | with `dynamo_rs` | ~100 s | 34 911 | +0.35 % |
+| **Python** (pydynamo) | pure Python fallback | >10 min | — | — |
+
+The −0.80 % MATLAB-vs-Rust gap is a subtle label-assignment-order detail in
+merge (pixel sets match 100 %); it shifts ~270 peaks across the
+bandwidth/duration filter cutoffs. SO-power histogram cosine similarity vs
+MATLAB is 0.999, SO-phase 0.996 — visually indistinguishable.
 
 ### Known per-platform gotchas
 
@@ -267,22 +271,6 @@ Want a native binary with no MATLAB/Python runtime?        →  DYNAM-O_rs CLI (
 
 - **Most MATLAB users:** clone [`DYNAM-O_dev`](https://github.com/preraulab/DYNAM-O_dev), use `backend='rust'` (default).
 - **Most Python users:** clone [`DYNAM-O_py`](https://github.com/preraulab/DYNAM-O_py), let it pick up `dynamo_rs` automatically when present.
-
-### Performance comparison
-
-Full-night example recording (~8.4 h, MATLAB reference = 34 788 peaks):
-
-| Implementation | Backend | Wallclock (Apple M3, 8-core) | Peak count | vs MATLAB |
-|---|---|---:|---:|---:|
-| **MATLAB** | `'matlab'` | ~125 s | 34 788 | reference |
-| **MATLAB** | `'rust'` *(default)* | **~30 s** | 34 511 | −0.80 % |
-| **Python** (pydynamo) | with `dynamo_rs` | ~100 s | 34 911 | +0.35 % |
-| **Python** (pydynamo) | pure Python fallback | >10 min | — | — |
-
-The −0.80 % MATLAB-vs-Rust gap is a subtle label-assignment-order detail in
-merge (pixel sets match 100 %); it shifts ~270 peaks across the
-bandwidth/duration filter cutoffs. SO-power histogram cosine similarity vs
-MATLAB is 0.999, SO-phase 0.996 — visually indistinguishable.
 
 ### Recommended sampling frequency: 100 Hz
 
@@ -330,7 +318,7 @@ identical.
 If you only want one of the three pieces (e.g. just MATLAB, or just Python), the per-package recipes below do exactly what `bootstrap.sh` would do for that one — clone the sub-repo, install its toolchain, build.
 
 <details>
-<summary><strong>• MATLAB (<code>DYNAM-O_dev</code>)</strong></summary>
+<summary><strong> MATLAB (<code>DYNAM-O_dev</code>)</strong></summary>
 
 
 The MATLAB implementation has two backends: `'matlab'` (pure MATLAB, reference
@@ -413,7 +401,7 @@ Detailed API, options, and recipes:
 </details>
 
 <details>
-<summary><strong>• Python (<code>DYNAM-O_py</code> / pydynamo)</strong></summary>
+<summary><strong> Python (<code>DYNAM-O_py</code> / pydynamo)</strong></summary>
 
 Pydynamo runs end-to-end in Python. The Rust core is optional but strongly
 recommended — with `dynamo_rs` installed, pydynamo delegates watershed,
@@ -484,7 +472,7 @@ comparisons:
 </details>
 
 <details>
-<summary><strong>• Rust (<code>DYNAM-O_rs</code>)</strong></summary>
+<summary><strong> Rust (<code>DYNAM-O_rs</code>)</strong></summary>
 
 Standalone build of the pure-Rust kernel. Useful if you want to integrate
 `dynamo_rs` into your own Rust / C / Python project.
@@ -565,6 +553,18 @@ Detailed crate layout, consumer matrix, and API reference:
 [`DYNAM-O_rs/README.md`](https://github.com/preraulab/DYNAM-O_rs/blob/rust-bridge/README.md).
 
 </details>
+
+> ### ⚠️ Branch note
+>
+> All of the install recipes below clone the **`rust-bridge`** branch of each
+> sub-repo. That's where the current backend refactor, Rust core fixes, and
+> cross-repo coordination live. Default branches (`master`) will catch up
+> once `rust-bridge` is merged in each sub-repo.
+>
+> If you forget the `-b rust-bridge` flag, MATLAB won't have a `'backend'`
+> option, the Rust core will use the older `expand_labels_bfs` border fill
+> (~+2 % peak-count drift vs MATLAB), and the README links in this repo
+> will point at paths that don't exist yet on the default branch.
 
 ---
 
