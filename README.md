@@ -32,7 +32,7 @@ build the MATLAB MEX wrappers and set up the Python venv for pydynamo.
 
 ### macOS / Linux / WSL / Git-Bash
 
-Requires only `git` and `curl` on PATH (rustup auto-installs on consent).
+Requires only `git` and `curl` on PATH (`rustup` auto-installs on consent).
 **SSH is the default** — works best for lab contributors who will
 commit+push MEX or benchmark artifacts back. The bootstrap inherits
 whichever protocol you used to clone this meta-repo, so HTTPS works too.
