@@ -50,6 +50,27 @@ cd DYNAM-O_toolbox
 
 Flags: `--yes` for non-interactive, `--rust-only` to skip MATLAB + Python.
 
+### Windows (PowerShell)
+
+Requires [Git for Windows](https://git-scm.com/download/win). PowerShell 5
+(built into Windows 10/11) or PowerShell 7 both work. Copy the whole block
+into a PowerShell prompt — the `-ExecutionPolicy Bypass` is needed because
+Windows blocks running unsigned local scripts by default:
+
+```powershell
+# SSH (default)
+git clone git@github.com:preraulab/DYNAM-O_toolbox.git
+
+# or HTTPS
+git clone https://github.com/preraulab/DYNAM-O_toolbox.git
+
+cd DYNAM-O_toolbox
+powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
+```
+
+Flags: `-Yes` for non-interactive, `-RustOnly` to skip MATLAB + Python,
+e.g. `powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Yes`.
+
 <details>
 <summary><strong>SSH vs HTTPS — which do I want?</strong></summary>
 
@@ -71,27 +92,6 @@ Flags: `--yes` for non-interactive, `--rust-only` to skip MATLAB + Python.
 > HTTPS gives HTTPS submodules. No extra config required.
 
 </details>
-
-### Windows (PowerShell)
-
-Requires [Git for Windows](https://git-scm.com/download/win). PowerShell 5
-(built into Windows 10/11) or PowerShell 7 both work. Copy the whole block
-into a PowerShell prompt — the `-ExecutionPolicy Bypass` is needed because
-Windows blocks running unsigned local scripts by default:
-
-```powershell
-# SSH (default)
-git clone git@github.com:preraulab/DYNAM-O_toolbox.git
-
-# or HTTPS
-git clone https://github.com/preraulab/DYNAM-O_toolbox.git
-
-cd DYNAM-O_toolbox
-powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
-```
-
-Flags: `-Yes` for non-interactive, `-RustOnly` to skip MATLAB + Python,
-e.g. `powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Yes`.
 
 <details>
 <summary><strong>What the script does</strong></summary>
