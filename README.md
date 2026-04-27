@@ -89,7 +89,8 @@ powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
 Flags: `-Yes` for non-interactive, `-RustOnly` to skip MATLAB + Python,
 e.g. `powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Yes`.
 
-### What the script does
+<details>
+<summary><strong>What the script does</strong></summary>
 
 - **Clones** any missing sub-repo (`DYNAM-O_rs`, `DYNAM-O_dev`, `DYNAM-O_py`) on the `rust-bridge` branch, *with submodules* — each `git clone --recursive -b rust-bridge …` + a defensive `git submodule update --init --recursive` pass so the nested helpers (CSSuicontrols, multitaper_spectrogram, nanstats, erpplot, dynamo_helpers, etc.) land correctly even on flaky networks. If a sub-repo is already present (e.g., from a prior `git clone --recursive` that pinned a different branch), it offers to fetch + check out `rust-bridge` so all three are aligned.
 - **Installs Rust** via rustup (prompts once for consent).
@@ -103,7 +104,10 @@ It's **idempotent** — re-run it after any `git pull` to rebuild, or to add the
 
 If anything fails, skip to the manual per-language sections below.
 
-### Manual equivalent (if you'd rather not run the script)
+</details>
+
+<details>
+<summary><strong>Manual equivalent (if you'd rather not run the script)</strong></summary>
 
 The bootstrap is a convenience wrapper — everything it does can be run by hand:
 
@@ -157,7 +161,10 @@ git pull --ff-only
 git submodule update --init --recursive
 ```
 
-### Share pre-built binaries (contributors)
+</details>
+
+<details>
+<summary><strong>Share pre-built binaries (contributors)</strong></summary>
 
 The MATLAB `'rust'` backend needs a MEX binary for *each* platform it runs on (`.mexmaca64` for Apple Silicon, `.mexmaci64` for Intel Mac, `.mexa64` for Linux, `.mexw64` for Windows). Each MEX also needs `libdynamo_rs.{dylib,so,dll}` sitting next to it — `build_rust_mex` now copies the shared library into `rust_bridge/` and embeds a loader-relative rpath, so the pair is fully relocatable once committed.
 
@@ -172,7 +179,10 @@ Consent → stages *only* those files (not your unrelated edits), commits with a
 
 **Decline** if you're on a throwaway branch, lack push permission, or need to inspect the diff first. The commit is always made locally; the push is a second prompt. You can always push manually later with `cd DYNAM-O_dev && git push origin rust-bridge`.
 
-### Benchmarking
+</details>
+
+<details>
+<summary><strong>Benchmarking</strong></summary>
 
 After the MEX step, the bootstrap offers to run `benchmark_runDYNAMO('night')` head-to-head on **both** backends — pure-MATLAB reference vs Rust MEX — and commits the resulting JSON under `DYNAM-O_dev/rust_bridge/benchmarks/runs/`. The file captures:
 
@@ -213,7 +223,10 @@ benchmark_summarize('csv_out', '/tmp/dynamo_bench.csv')
 
 See [`DYNAM-O_dev/rust_bridge/benchmarks/README.md`](https://github.com/preraulab/DYNAM-O_dev/blob/rust-bridge/rust_bridge/benchmarks/README.md) for the full JSON schema and contribution flow.
 
-### Performance comparison
+</details>
+
+<details>
+<summary><strong>Performance comparison</strong></summary>
 
 Full-night example recording (~8.4 h, MATLAB reference = 34 788 peaks):
 
@@ -229,7 +242,10 @@ merge (pixel sets match 100 %); it shifts ~270 peaks across the
 bandwidth/duration filter cutoffs. SO-power histogram cosine similarity vs
 MATLAB is 0.999, SO-phase 0.996 — visually indistinguishable.
 
-### Known per-platform gotchas
+</details>
+
+<details>
+<summary><strong>Known per-platform gotchas</strong></summary>
 
 Two pre-existing system issues observed on RHEL 8 / CentOS 8 hosts (neither is a bug in this toolbox — both are environment quirks):
 
@@ -252,6 +268,8 @@ sudo dnf install python39         # or python311
 …and rerun the bootstrap with it on PATH, or just decline the Python step at bootstrap's confirm prompt (the MATLAB and standalone-Rust-CLI paths don't need Python).
 
 **macOS 26 + MATLAB R2025b interactive runs.** A recurrent Qt/CEF font-rendering SIGSEGV can crash long interactive `runDYNAMO('night', 'backend', 'matlab')` runs. The `matlab` backend path no longer uses `waitbar` (removed 2026-04-24); run via `benchmark_runDYNAMO` or `bash run_benchmark.sh` (both use `matlab -batch`) for any long measurement — `-batch` mode never loads the desktop / Qt / CEF, so the crash path literally isn't in the process.
+
+</details>
 
 ---
 
