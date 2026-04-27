@@ -329,7 +329,9 @@ identical.
 
 If you only want one of the three pieces (e.g. just MATLAB, or just Python), the per-package recipes below do exactly what `bootstrap.sh` would do for that one — clone the sub-repo, install its toolchain, build.
 
-### • MATLAB (`DYNAM-O_dev`)
+<details>
+<summary><strong>• MATLAB (<code>DYNAM-O_dev</code>)</strong></summary>
+
 
 The MATLAB implementation has two backends: `'matlab'` (pure MATLAB, reference
 implementation) and `'rust'` (MEX wrappers around `dynamo_rs`, ~4× faster
@@ -408,7 +410,10 @@ recording (`benchmark_runDYNAMO` with warmup, 3-trial median):
 Detailed API, options, and recipes:
 [`DYNAM-O_dev/README.md`](https://github.com/preraulab/DYNAM-O_dev/blob/rust-bridge/README.md).
 
-### • Python (`DYNAM-O_py` / pydynamo)
+</details>
+
+<details>
+<summary><strong>• Python (<code>DYNAM-O_py</code> / pydynamo)</strong></summary>
 
 Pydynamo runs end-to-end in Python. The Rust core is optional but strongly
 recommended — with `dynamo_rs` installed, pydynamo delegates watershed,
@@ -476,7 +481,10 @@ Detailed usage, stage-by-stage accuracy tables, and side-by-side MATLAB
 comparisons:
 [`DYNAM-O_py/README.md`](https://github.com/preraulab/DYNAM-O_py/blob/rust-bridge/README.md).
 
-### • Rust (`DYNAM-O_rs`)
+</details>
+
+<details>
+<summary><strong>• Rust (<code>DYNAM-O_rs</code>)</strong></summary>
 
 Standalone build of the pure-Rust kernel. Useful if you want to integrate
 `dynamo_rs` into your own Rust / C / Python project.
@@ -555,6 +563,8 @@ for the full module map.
 
 Detailed crate layout, consumer matrix, and API reference:
 [`DYNAM-O_rs/README.md`](https://github.com/preraulab/DYNAM-O_rs/blob/rust-bridge/README.md).
+
+</details>
 
 ---
 
