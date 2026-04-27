@@ -556,7 +556,7 @@ Detailed crate layout, consumer matrix, and API reference:
 
 > ### ⚠️ Branch note
 >
-> All of the install recipes below clone the **`rust-bridge`** branch of each
+> All of the install recipes above clone the **`rust-bridge`** branch of each
 > sub-repo. That's where the current backend refactor, Rust core fixes, and
 > cross-repo coordination live. Default branches (`master`) will catch up
 > once `rust-bridge` is merged in each sub-repo.
