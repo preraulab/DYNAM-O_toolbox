@@ -50,7 +50,9 @@ cd DYNAM-O_toolbox
 
 Flags: `--yes` for non-interactive, `--rust-only` to skip MATLAB + Python.
 
-> **SSH vs HTTPS — which do I want?**
+<details>
+<summary><strong>SSH vs HTTPS — which do I want?</strong></summary>
+
 > - **SSH** is the contributor default. Needs a public key registered on
 >   GitHub once
 >   ([instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh)).
@@ -67,6 +69,8 @@ Flags: `--yes` for non-interactive, `--rust-only` to skip MATLAB + Python.
 > `DYNAM-O_dev/.gitmodules` are relative (`../multitaper_toolbox.git`
 > style), so cloning over SSH gives SSH submodules and cloning over
 > HTTPS gives HTTPS submodules. No extra config required.
+
+</details>
 
 ### Windows (PowerShell)
 
