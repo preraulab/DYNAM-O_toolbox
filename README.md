@@ -72,7 +72,7 @@ Flags: `-Yes` for non-interactive, `-RustOnly` to skip MATLAB + Python,
 e.g. `powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Yes`.
 
 <details>
-<summary><strong>SSH vs HTTPS — which do I want?</strong></summary>
+<summary><strong>SSH vs HTTPS</strong></summary>
 
 > - **SSH** is the contributor default. Needs a public key registered on
 >   GitHub once
@@ -277,18 +277,18 @@ sudo dnf install python39         # or python311
 
 ---
 
-## Which one should I use?
+## Which implementation should I use?
 
 ```
 Are you writing MATLAB code or need the File Manager GUI?  →  DYNAM-O_dev (MATLAB)
     Want it fast?                                          →  build the 'rust' backend (~4x end-to-end, ~8x on extract)
     Just want the reference implementation?                →  'matlab' backend, no extra setup
 
-Are you in Python / MNE?                                   →  DYNAM-O_py (pydynamo)
+Are you in Python / using MNE-Python?                      →  DYNAM-O_py (pydynamo)
     Want it fast?                                          →  build dynamo_rs as a PyO3 wheel (auto-detected)
 
 Are you integrating Rust into your own pipeline?           →  DYNAM-O_rs (library)
-Want a native binary with no MATLAB/Python runtime?        →  DYNAM-O_rs CLI (`dynamo extract`)
+    Want a native binary with no MATLAB/Python runtime?    →  DYNAM-O_rs CLI (`dynamo extract`)
 ```
 
 - **Most MATLAB users:** clone [`DYNAM-O_dev`](https://github.com/preraulab/DYNAM-O_dev), use `backend='rust'` (default).
