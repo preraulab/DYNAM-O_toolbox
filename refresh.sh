@@ -147,7 +147,43 @@ fi
 
 # ---------- 4. Refresh Python extension if venv exists ----------
 VENV="$REPO_ROOT/DYNAM-O_py/.venv"
-if [ -d "$VENV" ]; then
+
+# Detect a broken venv. Common cause: the underlying Python interpreter
+# was uninstalled (e.g. switching from miniconda → miniforge), leaving
+# dangling symlinks in .venv/bin/. The directory exists but its python
+# isn't executable. Without this check, refresh.sh crashes with
+# "No such file or directory" trying to run maturin.
+if [ -d "$VENV" ] && ! "$VENV/bin/python" --version >/dev/null 2>&1; then
+    warn "Existing venv at $VENV looks broken (its python isn't executable —"
+    warn "  probably the interpreter it was created against was removed)."
+    if confirm "Wipe the broken venv and recreate from scratch?"; then
+        rm -rf "$VENV"
+    else
+        warn "Skipping Python rebuild. Run bootstrap.sh to recreate the venv."
+        VENV=""
+    fi
+fi
+
+# Create the venv if it's missing (either never existed, or just wiped above).
+if [ -n "$VENV" ] && [ ! -d "$VENV" ]; then
+    PY="$(command -v python3 || command -v python || true)"
+    if [ -z "$PY" ]; then
+        warn "No python on PATH — skipping venv creation."
+        VENV=""
+    elif confirm "Create a fresh venv at $VENV (using $($PY --version 2>&1))?"; then
+        info "Creating venv..."
+        "$PY" -m venv "$VENV"
+        # Same split-install trick as bootstrap: upgrade pip first, install
+        # maturin second. Old pips fail PEP 517 builds otherwise.
+        info "Upgrading pip + installing maturin..."
+        "$VENV/bin/pip" install --quiet --upgrade "pip>=21" setuptools wheel
+        "$VENV/bin/pip" install --quiet maturin
+    else
+        VENV=""
+    fi
+fi
+
+if [ -n "$VENV" ] && [ -d "$VENV" ]; then
     PYBIN="$VENV/bin/python"
     PIP="$VENV/bin/pip"
     if confirm "Rebuild pydynamo Python extension (maturin develop --release)?"; then
@@ -162,8 +198,7 @@ if [ -d "$VENV" ]; then
         ok "pydynamo refreshed in $VENV."
     fi
 else
-    info "No Python venv found at $VENV — skipping pydynamo rebuild."
-    info "Run bootstrap.sh once to create the venv if you want pydynamo."
+    info "No Python venv at $VENV — skipping pydynamo rebuild."
 fi
 
 echo
