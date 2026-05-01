@@ -274,7 +274,12 @@ if [ -n "$PY" ]; then
         PYBIN="$VENV/bin/python"
         PIP="$VENV/bin/pip"
         info "Installing pip + maturin in the venv..."
-        "$PIP" install --quiet --upgrade pip maturin
+        # Upgrade pip/setuptools/wheel FIRST as their own command. Old pips
+        # (Python 3.5/3.6 era) can't handle modern PEP 517 builds and will
+        # try `python setup.py egg_info` on maturin and fail. Splitting the
+        # commands forces the upgrade to land before maturin is installed.
+        "$PIP" install --quiet --upgrade "pip>=21" setuptools wheel
+        "$PIP" install --quiet maturin
         info "Building dynamo_rs Python extension (maturin develop --release)..."
         (
             # maturin refuses when CONDA_PREFIX and VIRTUAL_ENV are both set.
