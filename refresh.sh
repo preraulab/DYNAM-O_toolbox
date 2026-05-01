@@ -52,11 +52,16 @@ confirm() {
 
 # ---------- 1. Refresh each sub-repo ----------
 #
-# Pull latest on whatever branch each sub-repo is currently on, then
-# sync + init submodules in case URLs or pinned commits changed upstream.
+# Each sub-repo is expected to be on the rust-bridge branch (matches
+# bootstrap.sh). If it's on a different branch we warn + offer to switch;
+# refusing leaves it on the current branch, which usually means a
+# contributor doing local feature work who knows what they want.
+#
 # We use `--ff-only` deliberately: a merge surprise during a refresh is
 # almost never what the user wants. If a sub-repo has diverging local
 # commits, this will fail loudly and the user can deal with it manually.
+BRANCH="rust-bridge"
+
 refresh_subrepo() {
     local dir="$1"
 
@@ -71,6 +76,16 @@ refresh_subrepo() {
     if [ "$current" = "DETACHED" ]; then
         warn "$dir is in detached-HEAD state — skipping pull (would lose your position)."
     else
+        if [ "$current" != "$BRANCH" ]; then
+            warn "$dir is on '$current', not '$BRANCH'."
+            if confirm "Fetch + check out $BRANCH in $dir?"; then
+                git -C "$dir" fetch origin "$BRANCH"
+                git -C "$dir" checkout "$BRANCH"
+                current="$BRANCH"
+            else
+                warn "  Staying on '$current' — refreshing that branch instead."
+            fi
+        fi
         info "Fetching $dir..."
         git -C "$dir" fetch origin --tags --prune
         info "Pulling $dir ($current)..."
