@@ -11,6 +11,12 @@
 #   ./bootstrap.sh --yes         non-interactive; accept all prompts
 #   ./bootstrap.sh --rust-only   only build the Rust core (skip MATLAB + Python)
 #
+# Per-sub-repo branch overrides (CLI flag or env var; CLI wins):
+#   --dev-branch <name>          DYNAM-O_dev branch     (default: file-manager-overhaul)
+#   --rs-branch  <name>          DYNAM-O_rs  branch     (default: rust-bridge)
+#   --py-branch  <name>          DYNAM-O_py  branch     (default: rust-bridge)
+#   DEV_BRANCH=foo ./bootstrap.sh        same effect via env var
+#
 # Re-run any time — each step checks whether its target already exists.
 
 set -euo pipefail
@@ -32,15 +38,27 @@ err()  { printf "${C_RED}[bootstrap]${C_RST} %s\n" "$*" >&2; }
 
 AUTO_YES=false
 RUST_ONLY=false
-for arg in "$@"; do
-    case "$arg" in
+# Per-sub-repo branch defaults. Active GUI / MATLAB-side work lives on
+# file-manager-overhaul; rust-bridge is the binary-integration branch
+# where MEX artifacts get committed (the Rust+Py side track that).
+# Env vars override the defaults; CLI flags override env vars.
+DEV_BRANCH="${DEV_BRANCH:-file-manager-overhaul}"
+RS_BRANCH="${RS_BRANCH:-rust-bridge}"
+PY_BRANCH="${PY_BRANCH:-rust-bridge}"
+while [ $# -gt 0 ]; do
+    case "$1" in
         --yes|-y) AUTO_YES=true ;;
         --rust-only) RUST_ONLY=true ;;
+        --dev-branch) DEV_BRANCH="$2"; shift ;;
+        --rs-branch)  RS_BRANCH="$2";  shift ;;
+        --py-branch)  PY_BRANCH="$2";  shift ;;
         --help|-h)
-            sed -n '2,20p' "$0"; exit 0 ;;
-        *) err "unknown flag: $arg"; exit 2 ;;
+            sed -n '2,25p' "$0"; exit 0 ;;
+        *) err "unknown flag: $1"; exit 2 ;;
     esac
+    shift
 done
+info "Branches: DYNAM-O_dev=$DEV_BRANCH  DYNAM-O_rs=$RS_BRANCH  DYNAM-O_py=$PY_BRANCH"
 
 confirm() {
     local prompt="$1"
@@ -50,16 +68,21 @@ confirm() {
     [[ "$yn" =~ ^[Yy] ]]
 }
 
-# ---------- 1. Ensure sub-repos exist AND are on the rust-bridge branch ----------
+# ---------- 1. Ensure sub-repos exist AND are on their target branches ----------
 #
 # Two ways a user gets here:
 #   (a) Fresh meta-repo clone (no submodules today) → sub-repo dirs don't
-#       exist yet. We clone each on rust-bridge.
+#       exist yet. We clone each at its target branch.
 #   (b) Meta-repo with submodules (Part 3, future) → `git clone --recursive`
 #       has already populated the sub-repo dirs at whatever SHA the meta-repo
-#       pins. That SHA may not be on rust-bridge. We detect + offer to
+#       pins. That SHA may not match the target branch. We detect + offer to
 #       switch.
-BRANCH="rust-bridge"
+#
+# Each sub-repo has its own target branch (DEV_BRANCH / RS_BRANCH / PY_BRANCH).
+# The MATLAB-side feature branch (file-manager-overhaul) and the Rust-side
+# binary-integration branch (rust-bridge) are intentionally separate so MEX
+# artifacts don't pollute MATLAB feature reviews.
+
 # Inherit the clone protocol from the meta-repo's origin URL. A user who
 # cloned this repo via git@github.com:... gets SSH sub-repos; a user who
 # cloned via https://... gets HTTPS sub-repos. Matches the submodule
@@ -108,32 +131,53 @@ attach_submodules() {
 }
 
 align_subrepo() {
-    local dir="$1" repo="$2"
+    local dir="$1" repo="$2" branch="$3"
 
     if [ -d "$dir/.git" ] || [ -f "$dir/.git" ]; then
         # Already present — verify branch.
         local current
         current="$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || echo 'DETACHED')"
-        if [ "$current" = "$BRANCH" ]; then
-            ok "$dir on $BRANCH."
+        if [ "$current" = "$branch" ]; then
+            ok "$dir on $branch."
+            # Even when already on the right branch name, the LOCAL branch
+            # may have been created from the wrong base (e.g. via plain
+            # `git checkout <name>` from rust-bridge HEAD when the local
+            # ref didn't exist) and ended up not tracking origin/<name>.
+            # Verify upstream is set + ahead/behind makes sense.
+            local upstream
+            upstream="$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+            if [ "$upstream" != "origin/$branch" ]; then
+                warn "$dir/$branch isn't tracking origin/$branch (currently: '${upstream:-<none>}')."
+                if confirm "Set upstream to origin/$branch and hard-reset to its tip?"; then
+                    git -C "$dir" fetch origin "$branch"
+                    git -C "$dir" branch --set-upstream-to="origin/$branch" "$branch" || true
+                    git -C "$dir" reset --hard "origin/$branch"
+                fi
+            else
+                # Upstream is correct — fast-forward to the latest origin.
+                git -C "$dir" fetch origin "$branch" --quiet || true
+                git -C "$dir" merge --ff-only "origin/$branch" 2>/dev/null || \
+                    warn "  $dir not fast-forwardable from origin/$branch (local commits diverge?). Leaving alone."
+            fi
             info "  syncing submodules: git -C $dir submodule update --init --recursive"
             git -C "$dir" submodule update --init --recursive || true
         else
-            warn "$dir is on '$current' (expected '$BRANCH')."
-            if confirm "Fetch + check out $BRANCH in $dir?"; then
-                git -C "$dir" fetch origin "$BRANCH"
-                git -C "$dir" checkout "$BRANCH"
-                git -C "$dir" pull --ff-only origin "$BRANCH" || true
+            warn "$dir is on '$current' (expected '$branch')."
+            if confirm "Fetch + check out $branch in $dir?"; then
+                git -C "$dir" fetch origin "$branch"
+                # `-B` recreates the local branch ref pointing at origin/<branch>
+                # even if a stale local ref already existed at the wrong base.
+                git -C "$dir" checkout -B "$branch" "origin/$branch"
                 info "  syncing submodules: git -C $dir submodule update --init --recursive"
                 git -C "$dir" submodule update --init --recursive || true
-                ok "$dir now on $BRANCH."
+                ok "$dir now on $branch."
             else
                 warn "Leaving $dir on '$current'. Downstream builds may use stale code."
             fi
         fi
     else
-        info "Cloning: git clone --recursive -b $BRANCH $CLONE_BASE/$repo.git $dir"
-        git clone --recursive -b "$BRANCH" "$CLONE_BASE/$repo.git" "$dir"
+        info "Cloning: git clone --recursive -b $branch $CLONE_BASE/$repo.git $dir"
+        git clone --recursive -b "$branch" "$CLONE_BASE/$repo.git" "$dir"
         # --recursive on git clone already runs the initial submodule update;
         # the explicit call below is a no-op safety net for cases where
         # --recursive silently failed on a subset (e.g. bad network).
@@ -143,11 +187,31 @@ align_subrepo() {
     # Re-attach every submodule to the branch named in .gitmodules. The
     # initial `--recursive` clone always lands them in detached HEAD.
     attach_submodules "$dir"
+
+    # Clean up moved-submodule residue: any directory listed in HEAD's
+    # .gitmodules MUST actually be a submodule on disk; any *other*
+    # untracked directory under the historical submodule parents
+    # (toolbox/helper_functions/ , app/components/) likely came from a
+    # different branch's layout. We don't auto-rm — too risky — but
+    # surface them so the user can decide.
+    if [ -f "$dir/.gitmodules" ]; then
+        local stale
+        stale="$(git -C "$dir" status --porcelain --ignored=no -- \
+                 'toolbox/helper_functions/' 'app/components/' 2>/dev/null \
+                 | awk '$1 == "??" {print $2}' \
+                 | grep -E '/$' || true)"
+        if [ -n "$stale" ]; then
+            warn "$dir has untracked dirs that look like moved-submodule residue:"
+            echo "$stale" | sed 's|^|    |'
+            warn "  These are likely empty or stale from a previous branch's layout."
+            warn "  Inspect, then 'rm -rf' if confirmed empty / not your work."
+        fi
+    fi
 }
 
-align_subrepo DYNAM-O_rs DYNAM-O_rs
-align_subrepo DYNAM-O_dev DYNAM-O_dev
-align_subrepo DYNAM-O_py DYNAM-O_py
+align_subrepo DYNAM-O_rs  DYNAM-O_rs  "$RS_BRANCH"
+align_subrepo DYNAM-O_dev DYNAM-O_dev "$DEV_BRANCH"
+align_subrepo DYNAM-O_py  DYNAM-O_py  "$PY_BRANCH"
 
 # ---------- 2. Rust toolchain ----------
 if ! command -v cargo >/dev/null 2>&1; then
@@ -215,8 +279,11 @@ if [ -n "$MATLAB_BIN" ]; then
 
     # --- Offer to commit + push the freshly-built platform-specific binaries ---
     # Goal: contributors on each platform push their MEX + shared-library
-    # artifacts back to rust-bridge so end users can clone-and-run without
-    # needing MATLAB or a Rust toolchain themselves.
+    # artifacts back to whichever branch DYNAM-O_dev is on, so end users on
+    # the same platform can clone-and-run without needing MATLAB or a Rust
+    # toolchain themselves. The contributor consciously chose DEV_BRANCH at
+    # bootstrap time, so we commit there with a confirm prompt — no
+    # hardcoded "must be rust-bridge" gate (overhaul has its own MEX, etc).
     if $MEX_BUILT; then
         MEX_DIR="$REPO_ROOT/DYNAM-O_dev/rust_bridge"
         CHANGED=$(git -C "$REPO_ROOT/DYNAM-O_dev" status --porcelain -- rust_bridge \
@@ -229,44 +296,27 @@ if [ -n "$MATLAB_BIN" ]; then
             info "Freshly-built platform binaries under DYNAM-O_dev/rust_bridge/:"
             echo "$CHANGED" | sed 's/^/    /'
             echo
-            if confirm "Commit + push these to the current branch so other users don't need to rebuild?"; then
+            DEV_HEAD_BRANCH="$(git -C "$REPO_ROOT/DYNAM-O_dev" symbolic-ref --short HEAD 2>/dev/null || echo 'HEAD')"
+            if confirm "Commit + push these to origin/$DEV_HEAD_BRANCH so other users don't need to rebuild?"; then
                 PLATFORM="$(uname -sm)"
-                DEV_BRANCH="$(git -C "$REPO_ROOT/DYNAM-O_dev" symbolic-ref --short HEAD 2>/dev/null || echo 'HEAD')"
                 RS_SHA="$(git -C "$REPO_ROOT/DYNAM-O_rs" rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
-                # Branch safety: pre-built binaries should land on rust-bridge,
-                # not whatever branch the contributor happens to be on.
-                if [ "$DEV_BRANCH" != "rust-bridge" ]; then
-                    warn "DYNAM-O_dev is on branch '$DEV_BRANCH', not 'rust-bridge'."
-                    warn "Platform binaries are normally committed to rust-bridge so the"
-                    warn "whole team picks them up. Pushing to '$DEV_BRANCH' may not be what you want."
-                    if ! confirm "Continue and push to '$DEV_BRANCH' anyway?"; then
-                        info "Skipping commit — checkout rust-bridge first if you want to contribute binaries."
-                        continue_mex_push=false
-                    else
-                        continue_mex_push=true
-                    fi
-                else
-                    continue_mex_push=true
-                fi
-                if $continue_mex_push; then
-                    # Stage only the binaries we just built — not unrelated modifications.
-                    (cd "$REPO_ROOT/DYNAM-O_dev" && echo "$CHANGED" | xargs git add --)
-                    (cd "$REPO_ROOT/DYNAM-O_dev" && git commit -m "chore: MEX binaries for $PLATFORM (dynamo_rs @ $RS_SHA)
+                # Stage only the binaries we just built — not unrelated modifications.
+                (cd "$REPO_ROOT/DYNAM-O_dev" && echo "$CHANGED" | xargs git add --)
+                (cd "$REPO_ROOT/DYNAM-O_dev" && git commit -m "chore: MEX binaries for $PLATFORM (dynamo_rs @ $RS_SHA)
 
 Pre-built artifacts committed from a bootstrap.sh run on $PLATFORM so end
 users on the same platform can clone + run without a MATLAB/Rust toolchain.
 
 dynamo_rs source SHA: $RS_SHA")
-                    if confirm "Push to origin/$DEV_BRANCH?"; then
-                        if git -C "$REPO_ROOT/DYNAM-O_dev" push origin "$DEV_BRANCH"; then
-                            ok "Pushed MEX binaries to origin/$DEV_BRANCH."
-                        else
-                            warn "Push failed (no permission, network, or non-fast-forward)."
-                            warn "The commit is in your local DYNAM-O_dev — push it manually when ready."
-                        fi
+                if confirm "Push to origin/$DEV_HEAD_BRANCH?"; then
+                    if git -C "$REPO_ROOT/DYNAM-O_dev" push origin "$DEV_HEAD_BRANCH"; then
+                        ok "Pushed MEX binaries to origin/$DEV_HEAD_BRANCH."
                     else
-                        ok "Committed locally. Push with:  (cd DYNAM-O_dev && git push origin $DEV_BRANCH)"
+                        warn "Push failed (no permission, network, or non-fast-forward)."
+                        warn "The commit is in your local DYNAM-O_dev — push it manually when ready."
                     fi
+                else
+                    ok "Committed locally. Push with:  (cd DYNAM-O_dev && git push origin $DEV_HEAD_BRANCH)"
                 fi
             fi
         fi

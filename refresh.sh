@@ -52,15 +52,14 @@ confirm() {
 
 # ---------- 1. Refresh each sub-repo ----------
 #
-# Each sub-repo is expected to be on the rust-bridge branch (matches
-# bootstrap.sh). If it's on a different branch we warn + offer to switch;
-# refusing leaves it on the current branch, which usually means a
-# contributor doing local feature work who knows what they want.
+# Refresh whatever branch each sub-repo is currently on. Branch selection
+# is bootstrap's job — refresh is "pull latest + rebuild", not "flip
+# branches". A user on file-manager-overhaul should keep getting refreshes
+# of overhaul; a user on rust-bridge should keep getting rust-bridge.
 #
 # We use `--ff-only` deliberately: a merge surprise during a refresh is
 # almost never what the user wants. If a sub-repo has diverging local
 # commits, this will fail loudly and the user can deal with it manually.
-BRANCH="rust-bridge"
 
 attach_submodules() {
     # Walk every initialized submodule and check out the branch named in
@@ -100,18 +99,18 @@ refresh_subrepo() {
     if [ "$current" = "DETACHED" ]; then
         warn "$dir is in detached-HEAD state — skipping pull (would lose your position)."
     else
-        if [ "$current" != "$BRANCH" ]; then
-            warn "$dir is on '$current', not '$BRANCH'."
-            if confirm "Fetch + check out $BRANCH in $dir?"; then
-                git -C "$dir" fetch origin "$BRANCH"
-                git -C "$dir" checkout "$BRANCH"
-                current="$BRANCH"
-            else
-                warn "  Staying on '$current' — refreshing that branch instead."
-            fi
-        fi
         info "Fetching $dir..."
         git -C "$dir" fetch origin --tags --prune
+        # Verify upstream is set; if a previous manual `git checkout <name>`
+        # created the local branch from the wrong base (no tracking), name
+        # the remote ref explicitly so the pull doesn't error out.
+        local upstream
+        upstream="$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+        if [ -z "$upstream" ]; then
+            warn "$dir/$current isn't tracking any remote. Setting upstream to origin/$current."
+            git -C "$dir" branch --set-upstream-to="origin/$current" "$current" 2>/dev/null || \
+                warn "  origin/$current doesn't exist. Skipping pull."
+        fi
         info "Pulling $dir ($current)..."
         if ! git -C "$dir" pull --ff-only origin "$current"; then
             warn "$dir: fast-forward pull failed (local commits diverge from origin/$current)."
@@ -133,6 +132,22 @@ refresh_subrepo() {
     # Detached submodules result whenever the gitlinks change (initial
     # clone, branch switch, fast-forward pull where pins moved).
     attach_submodules "$dir"
+
+    # Surface untracked dirs that look like moved-submodule residue
+    # (a previous branch had a submodule here, but the current branch
+    # moved or removed it — git reset/pull won't clean these up).
+    if [ -f "$dir/.gitmodules" ]; then
+        local stale
+        stale="$(git -C "$dir" status --porcelain --ignored=no -- \
+                 'toolbox/helper_functions/' 'app/components/' 2>/dev/null \
+                 | awk '$1 == "??" {print $2}' \
+                 | grep -E '/$' || true)"
+        if [ -n "$stale" ]; then
+            warn "$dir has untracked dirs that look like moved-submodule residue:"
+            echo "$stale" | sed 's|^|    |'
+            warn "  Inspect, then 'rm -rf' if confirmed empty / not your work."
+        fi
+    fi
 
     ok "$dir refreshed."
 }
