@@ -74,6 +74,39 @@ case "$_ORIGIN_URL" in
 esac
 unset _ORIGIN_URL
 
+attach_submodules() {
+    # Walk every initialized submodule and check out the branch named in
+    # the parent's .gitmodules. Without this, a fresh `git clone --recursive`
+    # leaves every submodule in detached HEAD: even with `update = merge`
+    # configured, the very first submodule update has no local branch to
+    # merge into, so Git falls back to a detached checkout. Empirically
+    # verified on a fresh clone — all 13 DYNAM-O_dev submodules detach
+    # without this step.
+    #
+    # Args:
+    #   $1: superproject directory (e.g. DYNAM-O_dev)
+    local sup="$1"
+    [ -d "$sup/.git" ] || [ -f "$sup/.git" ] || return 0
+
+    git -C "$sup" submodule --quiet foreach --recursive '
+        branch="$(git config -f "$toplevel/.gitmodules" --get "submodule.$name.branch" 2>/dev/null || true)"
+        if [ -n "$branch" ]; then
+            # Detect attached state. If already on the right branch, leave alone.
+            current="$(git symbolic-ref --short HEAD 2>/dev/null || echo "DETACHED")"
+            if [ "$current" != "$branch" ]; then
+                # Use existing local branch if present, otherwise create from
+                # the corresponding remote tracking branch. Either way the
+                # submodule ends up attached.
+                if git show-ref --verify --quiet "refs/heads/$branch"; then
+                    git checkout --quiet "$branch"
+                elif git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+                    git checkout --quiet -B "$branch" "origin/$branch"
+                fi
+            fi
+        fi
+    ' || true
+}
+
 align_subrepo() {
     local dir="$1" repo="$2"
 
@@ -106,6 +139,10 @@ align_subrepo() {
         # --recursive silently failed on a subset (e.g. bad network).
         git -C "$dir" submodule update --init --recursive || true
     fi
+
+    # Re-attach every submodule to the branch named in .gitmodules. The
+    # initial `--recursive` clone always lands them in detached HEAD.
+    attach_submodules "$dir"
 }
 
 align_subrepo DYNAM-O_rs DYNAM-O_rs

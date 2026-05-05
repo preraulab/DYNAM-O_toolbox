@@ -62,6 +62,30 @@ confirm() {
 # commits, this will fail loudly and the user can deal with it manually.
 BRANCH="rust-bridge"
 
+attach_submodules() {
+    # Walk every initialized submodule and check out the branch named in
+    # the parent's .gitmodules. Mirrors the helper in bootstrap.sh — the
+    # default `git submodule update` mode is `checkout`, which leaves the
+    # submodule detached at the pinned SHA. Re-attaching here keeps
+    # contributors on the tracking branch so they can pull/commit cleanly.
+    local sup="$1"
+    [ -d "$sup/.git" ] || [ -f "$sup/.git" ] || return 0
+
+    git -C "$sup" submodule --quiet foreach --recursive '
+        branch="$(git config -f "$toplevel/.gitmodules" --get "submodule.$name.branch" 2>/dev/null || true)"
+        if [ -n "$branch" ]; then
+            current="$(git symbolic-ref --short HEAD 2>/dev/null || echo "DETACHED")"
+            if [ "$current" != "$branch" ]; then
+                if git show-ref --verify --quiet "refs/heads/$branch"; then
+                    git checkout --quiet "$branch"
+                elif git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+                    git checkout --quiet -B "$branch" "origin/$branch"
+                fi
+            fi
+        fi
+    ' || true
+}
+
 refresh_subrepo() {
     local dir="$1"
 
@@ -104,6 +128,11 @@ refresh_subrepo() {
     git -C "$dir" submodule sync --recursive >/dev/null
     info "  updating submodules: git -C $dir submodule update --init --recursive"
     git -C "$dir" submodule update --init --recursive || true
+
+    # Re-attach every submodule to the branch named in .gitmodules.
+    # Detached submodules result whenever the gitlinks change (initial
+    # clone, branch switch, fast-forward pull where pins moved).
+    attach_submodules "$dir"
 
     ok "$dir refreshed."
 }
