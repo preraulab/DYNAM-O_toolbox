@@ -196,6 +196,13 @@ refresh_subrepo() {
     ok "$dir refreshed."
 }
 
+# Capture pre-refresh HEADs for the MEX-staleness check below. Need these
+# before refresh_subrepo runs since it may pull, branch-switch, or both.
+RS_PRE_HEAD=""
+DEV_PRE_HEAD=""
+[ -d DYNAM-O_rs/.git ]  && RS_PRE_HEAD="$(git -C DYNAM-O_rs rev-parse HEAD 2>/dev/null || echo '')"
+[ -d DYNAM-O_dev/.git ] && DEV_PRE_HEAD="$(git -C DYNAM-O_dev rev-parse HEAD 2>/dev/null || echo '')"
+
 refresh_subrepo DYNAM-O_rs  "$RS_BRANCH"
 refresh_subrepo DYNAM-O_dev "$DEV_BRANCH"
 refresh_subrepo DYNAM-O_py  "$PY_BRANCH"
@@ -221,15 +228,90 @@ if $RUST_ONLY; then
     exit 0
 fi
 
-# ---------- 3. MEX rebuild reminder (don't auto-run; gated on MATLAB license) ----------
-# We deliberately don't invoke MATLAB here. MEX builds are slow, license-
-# gated, and the binaries are usually committed under DYNAM-O_dev/rust_bridge/
-# by whoever ran bootstrap.sh on each platform. If the Rust core changed,
-# users on the same platform who pull will get the freshly-committed MEX.
-# A manual rebuild is only needed if you're on a new platform or actively
-# developing the rust_bridge wrappers themselves.
-if [ -d DYNAM-O_dev/rust_bridge ]; then
-    info "If you're developing rust_bridge wrappers, rebuild MEX manually:"
+# ---------- 3. MEX rebuild (offered only when something actually changed) ----------
+# Triggers (any of): rust core SHA moved during this refresh, rust_bridge
+# wrappers changed in the pull, uncommitted source changes in either path,
+# or no MEX exists for this platform yet. mtime would be the obvious signal
+# but cargo restores libdynamo_rs.{dylib,so,dll}'s mtime to its real
+# last-build time on incremental no-op builds, which defeats it.
+case "$(uname -sm)" in
+    "Darwin arm64")  MEX_EXT="mexmaca64" ;;
+    "Darwin x86_64") MEX_EXT="mexmaci64" ;;
+    Linux*)          MEX_EXT="mexa64" ;;
+    *)               MEX_EXT="" ;;
+esac
+
+MEX_DIR="$REPO_ROOT/DYNAM-O_dev/rust_bridge"
+NEEDS_MEX=false
+MEX_REASONS=()
+
+# (a) rust core moved during this refresh (pull or branch switch)
+if [ -n "$RS_PRE_HEAD" ] && [ "$RS_PRE_HEAD" != "$(git -C DYNAM-O_rs rev-parse HEAD 2>/dev/null || echo '')" ]; then
+    NEEDS_MEX=true
+    MEX_REASONS+=("DYNAM-O_rs HEAD moved (rust core changed)")
+fi
+
+# (b) rust core has uncommitted source changes (active dev)
+if [ -d DYNAM-O_rs/rust/src ] && [ -n "$(git -C DYNAM-O_rs status --porcelain -- rust/src rust/Cargo.toml rust/build.rs 2>/dev/null || true)" ]; then
+    NEEDS_MEX=true
+    MEX_REASONS+=("DYNAM-O_rs/rust has uncommitted source changes")
+fi
+
+# (c) rust_bridge wrappers changed during this refresh
+if [ -n "$DEV_PRE_HEAD" ] && [ "$DEV_PRE_HEAD" != "$(git -C DYNAM-O_dev rev-parse HEAD 2>/dev/null || echo '')" ]; then
+    if git -C DYNAM-O_dev diff --name-only "$DEV_PRE_HEAD" HEAD -- rust_bridge 2>/dev/null \
+       | grep -E '\.(c|h|m)$' >/dev/null; then
+        NEEDS_MEX=true
+        MEX_REASONS+=("DYNAM-O_dev/rust_bridge sources changed in pull")
+    fi
+fi
+
+# (d) rust_bridge wrappers have uncommitted source changes
+if [ -d "$MEX_DIR" ] && \
+   git -C DYNAM-O_dev status --porcelain -- rust_bridge 2>/dev/null \
+   | awk '{print $NF}' | grep -E '\.(c|h|m)$' >/dev/null; then
+    NEEDS_MEX=true
+    MEX_REASONS+=("DYNAM-O_dev/rust_bridge has uncommitted source changes")
+fi
+
+# (e) no MEX for this platform yet (first run on a new platform)
+if [ -n "$MEX_EXT" ] && [ -d "$MEX_DIR" ] && \
+   ! ls "$MEX_DIR"/*."$MEX_EXT" >/dev/null 2>&1; then
+    NEEDS_MEX=true
+    MEX_REASONS+=("no .$MEX_EXT MEX files for this platform")
+fi
+
+if $NEEDS_MEX && [ -d "$MEX_DIR" ]; then
+    warn "MEX rebuild may be needed:"
+    for r in "${MEX_REASONS[@]}"; do warn "    - $r"; done
+    # Same MATLAB search order as bootstrap.sh.
+    MATLAB_BIN=""
+    for candidate in matlab \
+                     /Applications/MATLAB*.app/bin/matlab \
+                     /usr/local/MATLAB/R*/bin/matlab \
+                     /opt/MATLAB/R*/bin/matlab; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            MATLAB_BIN="$(command -v "$candidate")"; break
+        fi
+        if [ -x "$candidate" ]; then
+            MATLAB_BIN="$candidate"; break
+        fi
+    done
+    if [ -z "$MATLAB_BIN" ]; then
+        warn "MATLAB not on PATH — skipping MEX rebuild prompt. From inside MATLAB:"
+        warn "    cd('$MEX_DIR'); build_rust_mex"
+    elif confirm "Rebuild MEX wrappers via $MATLAB_BIN (requires an active license)?"; then
+        info "Invoking MATLAB headless — this may take ~30 s..."
+        if "$MATLAB_BIN" -batch "cd('$MEX_DIR'); build_rust_mex" 2>&1 | tail -20; then
+            ok "MEX wrappers rebuilt."
+        else
+            warn "MATLAB headless build failed — often a license-checkout issue when another MATLAB session is open."
+            warn "Inside your running MATLAB, run:"
+            warn "    cd('$MEX_DIR'); build_rust_mex"
+        fi
+    fi
+elif [ -d "$MEX_DIR" ]; then
+    info "No MEX-relevant changes detected. Force a rebuild with:"
     info "    cd DYNAM-O_dev/rust_bridge && matlab -batch build_rust_mex"
 fi
 
