@@ -54,8 +54,8 @@ confirm() {
 #
 # Refresh whatever branch each sub-repo is currently on. Branch selection
 # is bootstrap's job — refresh is "pull latest + rebuild", not "flip
-# branches". A user on file-manager-overhaul should keep getting refreshes
-# of overhaul; a user on rust-bridge should keep getting rust-bridge.
+# branches". A user on rust-bridge keeps getting rust-bridge; a user on
+# a feature branch keeps getting that feature branch.
 #
 # We use `--ff-only` deliberately: a merge surprise during a refresh is
 # almost never what the user wants. If a sub-repo has diverging local

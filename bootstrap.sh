@@ -12,7 +12,7 @@
 #   ./bootstrap.sh --rust-only   only build the Rust core (skip MATLAB + Python)
 #
 # Per-sub-repo branch overrides (CLI flag or env var; CLI wins):
-#   --dev-branch <name>          DYNAM-O_dev branch     (default: file-manager-overhaul)
+#   --dev-branch <name>          DYNAM-O_dev branch     (default: rust-bridge)
 #   --rs-branch  <name>          DYNAM-O_rs  branch     (default: rust-bridge)
 #   --py-branch  <name>          DYNAM-O_py  branch     (default: rust-bridge)
 #   DEV_BRANCH=foo ./bootstrap.sh        same effect via env var
@@ -38,11 +38,11 @@ err()  { printf "${C_RED}[bootstrap]${C_RST} %s\n" "$*" >&2; }
 
 AUTO_YES=false
 RUST_ONLY=false
-# Per-sub-repo branch defaults. Active GUI / MATLAB-side work lives on
-# file-manager-overhaul; rust-bridge is the binary-integration branch
-# where MEX artifacts get committed (the Rust+Py side track that).
+# Per-sub-repo branch defaults. All three sub-repos default to rust-bridge,
+# the integration branch where MATLAB, Rust, and Python work converges.
+# Per-repo overrides are kept for contributors working on feature branches.
 # Env vars override the defaults; CLI flags override env vars.
-DEV_BRANCH="${DEV_BRANCH:-file-manager-overhaul}"
+DEV_BRANCH="${DEV_BRANCH:-rust-bridge}"
 RS_BRANCH="${RS_BRANCH:-rust-bridge}"
 PY_BRANCH="${PY_BRANCH:-rust-bridge}"
 while [ $# -gt 0 ]; do
@@ -78,10 +78,9 @@ confirm() {
 #       pins. That SHA may not match the target branch. We detect + offer to
 #       switch.
 #
-# Each sub-repo has its own target branch (DEV_BRANCH / RS_BRANCH / PY_BRANCH).
-# The MATLAB-side feature branch (file-manager-overhaul) and the Rust-side
-# binary-integration branch (rust-bridge) are intentionally separate so MEX
-# artifacts don't pollute MATLAB feature reviews.
+# Each sub-repo has its own target branch (DEV_BRANCH / RS_BRANCH / PY_BRANCH),
+# kept as separate knobs so a contributor can point any one sub-repo at a
+# feature branch without disturbing the other two.
 
 # Inherit the clone protocol from the meta-repo's origin URL. A user who
 # cloned this repo via git@github.com:... gets SSH sub-repos; a user who
