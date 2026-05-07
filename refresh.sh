@@ -10,6 +10,17 @@
 #   ./refresh.sh --yes          non-interactive; accept all prompts
 #   ./refresh.sh --rust-only    only refresh + rebuild the Rust core
 #
+# Per-sub-repo branch overrides (CLI flag or env var; CLI wins, mirroring
+# bootstrap.sh):
+#   --dev-branch <name>          DYNAM-O_dev branch     (default: rust-bridge)
+#   --rs-branch  <name>          DYNAM-O_rs  branch     (default: rust-bridge)
+#   --py-branch  <name>          DYNAM-O_py  branch     (default: rust-bridge)
+#   DEV_BRANCH=foo ./refresh.sh         same effect via env var
+#
+# If a sub-repo is on a different branch than its target, refresh prompts
+# to switch (matching bootstrap.sh) — needed so users still on the now-
+# merged file-manager-overhaul branch converge to rust-bridge on next run.
+#
 # Each sub-repo that doesn't exist yet is skipped with a warning — run
 # bootstrap.sh first if you haven't.
 
@@ -32,15 +43,25 @@ err()  { printf "${C_RED}[refresh]${C_RST} %s\n" "$*" >&2; }
 
 AUTO_YES=false
 RUST_ONLY=false
-for arg in "$@"; do
-    case "$arg" in
+# Targets default to rust-bridge for all three sub-repos, matching bootstrap.sh.
+# Env vars override defaults; CLI flags override env vars.
+DEV_BRANCH="${DEV_BRANCH:-rust-bridge}"
+RS_BRANCH="${RS_BRANCH:-rust-bridge}"
+PY_BRANCH="${PY_BRANCH:-rust-bridge}"
+while [ $# -gt 0 ]; do
+    case "$1" in
         --yes|-y) AUTO_YES=true ;;
         --rust-only) RUST_ONLY=true ;;
+        --dev-branch) DEV_BRANCH="$2"; shift ;;
+        --rs-branch)  RS_BRANCH="$2";  shift ;;
+        --py-branch)  PY_BRANCH="$2";  shift ;;
         --help|-h)
-            sed -n '2,14p' "$0"; exit 0 ;;
-        *) err "unknown flag: $arg"; exit 2 ;;
+            sed -n '2,25p' "$0"; exit 0 ;;
+        *) err "unknown flag: $1"; exit 2 ;;
     esac
+    shift
 done
+info "Targets: DYNAM-O_dev=$DEV_BRANCH  DYNAM-O_rs=$RS_BRANCH  DYNAM-O_py=$PY_BRANCH"
 
 confirm() {
     local prompt="$1"
@@ -52,10 +73,11 @@ confirm() {
 
 # ---------- 1. Refresh each sub-repo ----------
 #
-# Refresh whatever branch each sub-repo is currently on. Branch selection
-# is bootstrap's job — refresh is "pull latest + rebuild", not "flip
-# branches". A user on rust-bridge keeps getting rust-bridge; a user on
-# a feature branch keeps getting that feature branch.
+# Each sub-repo has a target branch (DEV_BRANCH / RS_BRANCH / PY_BRANCH).
+# If the sub-repo is on something else, refresh offers to switch — needed
+# because file-manager-overhaul was merged into rust-bridge, and existing
+# clones still on file-manager-overhaul would otherwise silently keep
+# refreshing a branch that no longer receives new commits.
 #
 # We use `--ff-only` deliberately: a merge surprise during a refresh is
 # almost never what the user wants. If a sub-repo has diverging local
@@ -86,7 +108,7 @@ attach_submodules() {
 }
 
 refresh_subrepo() {
-    local dir="$1"
+    local dir="$1" target="$2"
 
     if [ ! -d "$dir/.git" ] && [ ! -f "$dir/.git" ]; then
         warn "$dir not present — run bootstrap.sh first to clone it. Skipping."
@@ -95,6 +117,28 @@ refresh_subrepo() {
 
     local current
     current="$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || echo 'DETACHED')"
+
+    # Align to target branch if the sub-repo is on something else (or
+    # detached). Without this, refresh would silently keep a stale branch
+    # up-to-date and the user would never converge after the file-manager-
+    # overhaul → rust-bridge transition.
+    if [ "$current" != "$target" ]; then
+        if [ "$current" = "DETACHED" ]; then
+            warn "$dir is in detached-HEAD state (expected '$target')."
+        else
+            warn "$dir is on '$current' (expected '$target')."
+        fi
+        if confirm "Fetch + check out $target in $dir?"; then
+            git -C "$dir" fetch origin "$target"
+            # `-B` recreates the local branch ref pointing at origin/$target
+            # even if a stale local ref already exists at the wrong base.
+            git -C "$dir" checkout -B "$target" "origin/$target"
+            current="$target"
+            ok "$dir now on $target."
+        else
+            warn "Leaving $dir on '$current'. Refresh will pull that branch instead."
+        fi
+    fi
 
     if [ "$current" = "DETACHED" ]; then
         warn "$dir is in detached-HEAD state — skipping pull (would lose your position)."
@@ -152,9 +196,9 @@ refresh_subrepo() {
     ok "$dir refreshed."
 }
 
-refresh_subrepo DYNAM-O_rs
-refresh_subrepo DYNAM-O_dev
-refresh_subrepo DYNAM-O_py
+refresh_subrepo DYNAM-O_rs  "$RS_BRANCH"
+refresh_subrepo DYNAM-O_dev "$DEV_BRANCH"
+refresh_subrepo DYNAM-O_py  "$PY_BRANCH"
 
 # ---------- 2. Rebuild Rust core ----------
 if [ -d DYNAM-O_rs/rust ]; then
