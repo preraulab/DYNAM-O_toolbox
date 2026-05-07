@@ -235,10 +235,11 @@ fi
 # but cargo restores libdynamo_rs.{dylib,so,dll}'s mtime to its real
 # last-build time on incremental no-op builds, which defeats it.
 case "$(uname -sm)" in
-    "Darwin arm64")  MEX_EXT="mexmaca64" ;;
-    "Darwin x86_64") MEX_EXT="mexmaci64" ;;
-    Linux*)          MEX_EXT="mexa64" ;;
-    *)               MEX_EXT="" ;;
+    "Darwin arm64")  MEX_EXT="mexmaca64"; DYLIB_NAME="libdynamo_rs.dylib" ;;
+    "Darwin x86_64") MEX_EXT="mexmaci64"; DYLIB_NAME="libdynamo_rs.dylib" ;;
+    Linux*)          MEX_EXT="mexa64";    DYLIB_NAME="libdynamo_rs.so" ;;
+    MINGW*|MSYS*|CYGWIN*) MEX_EXT="mexw64"; DYLIB_NAME="dynamo_rs.dll" ;;
+    *)               MEX_EXT="";          DYLIB_NAME="" ;;
 esac
 
 MEX_DIR="$REPO_ROOT/DYNAM-O_dev/rust_bridge"
@@ -279,6 +280,27 @@ if [ -n "$MEX_EXT" ] && [ -d "$MEX_DIR" ] && \
    ! ls "$MEX_DIR"/*."$MEX_EXT" >/dev/null 2>&1; then
     NEEDS_MEX=true
     MEX_REASONS+=("no .$MEX_EXT MEX files for this platform")
+fi
+
+# (f) committed libdynamo_rs.{so,dylib,dll} in rust_bridge/ was built against
+# a different DYNAM-O_rs SHA than the one currently checked out. Bootstrap
+# commits these with subject "chore: MEX binaries for <platform> (dynamo_rs @ <sha>)",
+# so we can recover the build SHA from the most recent commit that touched
+# the platform-appropriate dylib. Catches the publish-side inconsistency
+# where the committed wrapper expects a symbol that the committed dylib
+# doesn't export (seen in practice: undefined symbol dynamo_multitaper_spectrogram).
+if [ -n "$DYLIB_NAME" ] && [ -f "$MEX_DIR/$DYLIB_NAME" ]; then
+    LIB_COMMIT_MSG="$(git -C DYNAM-O_dev log -1 --pretty=format:%s -- "rust_bridge/$DYLIB_NAME" 2>/dev/null || echo '')"
+    LIB_BUILD_SHA="$(printf '%s' "$LIB_COMMIT_MSG" | grep -oE 'dynamo_rs @ [0-9a-f]+' | awk '{print $NF}' || true)"
+    CURRENT_RS_SHA="$(git -C DYNAM-O_rs rev-parse HEAD 2>/dev/null || echo '')"
+    if [ -n "$LIB_BUILD_SHA" ] && [ -n "$CURRENT_RS_SHA" ]; then
+        # LIB_BUILD_SHA is short; truncate CURRENT_RS_SHA to compare.
+        CURRENT_RS_SHORT="$(printf '%s' "$CURRENT_RS_SHA" | cut -c1-${#LIB_BUILD_SHA})"
+        if [ "$LIB_BUILD_SHA" != "$CURRENT_RS_SHORT" ]; then
+            NEEDS_MEX=true
+            MEX_REASONS+=("rust_bridge/$DYLIB_NAME was built at dynamo_rs @ $LIB_BUILD_SHA, but DYNAM-O_rs is now at @ $CURRENT_RS_SHORT (committed dylib is stale)")
+        fi
+    fi
 fi
 
 if $NEEDS_MEX && [ -d "$MEX_DIR" ]; then
