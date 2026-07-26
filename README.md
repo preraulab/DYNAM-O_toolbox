@@ -89,22 +89,32 @@ defaults to No.
 
 ## Controlled rebuild and privacy gate
 
-The optional **Yes** path is the only supported way to produce native
-artifacts that may be committed or published. It records the three resolved
-child SHAs and the unchanged toolbox orchestrator SHA in
-`release-build-manifest.json`, while still building from the current moving
-`master` heads rather than treating those SHAs as pinned inputs.
+The optional **Yes** path (`./bootstrap.sh --yes` or
+`.\bootstrap.ps1 -Yes`) is the only supported way to produce native artifacts
+that may be committed or published. It records the three resolved child SHAs
+and the unchanged toolbox orchestrator SHA in `release-build-manifest.json`,
+while still building from the current moving `master` heads rather than
+treating those SHAs as pinned inputs.
 
-The builder applies canonical Rust source-path remapping to the Cargo, MATLAB
-MEX, and Maturin builds, uses the tracked Cargo lockfile and pinned Rust
+The builder remaps raw, absolute, and canonical forms of the workspace, user
+home, Cargo/Rustup homes, and temporary directory. Rust receives the mappings
+through `CARGO_ENCODED_RUSTFLAGS` with `--remap-path-scope=all`; the MEX C
+compiler receives equivalent source-path mappings. The controlled environment
+rejects inherited Rust flags and Cargo target overrides, fixes each crate's
+`CARGO_TARGET_DIR`, rejects target-directory symlink escapes, removes the
+expected pre-existing CLI, shared-library, `.rlib`, and MEX outputs, and fails
+unless the current build freshly recreates them in the expected host target
+directory.
+
+The builder uses the tracked Cargo lockfile and pinned Rust
 toolchain/Maturin version, sanitizes generated SBOMs, and rejects artifacts
-containing build-machine paths. It structurally inspects the current
-platform's native files and byte-scans every other platform binary already in
-`DYNAM-O/rust_bridge/`, so an older checked-in artifact cannot bypass the
-gate. It also verifies the expected current-platform artifacts and
-installation-relative runtime data layout. A missing compiler, MATLAB
-installation, SBOM sanitizer, expected artifact, or privacy check makes the
-controlled rebuild fail.
+containing build-machine paths. It structurally inspects the exact allowlist of
+current-platform native files, rejects any unexpected current-platform binary
+in `DYNAM-O/rust_bridge/`, and byte-scans every other-platform binary already
+there, so neither an extra nor an older checked-in artifact can bypass the
+gate. It also verifies the expected runtime data layout. A missing compiler,
+MATLAB installation, SBOM sanitizer, fresh expected artifact, or privacy check
+makes the controlled rebuild fail.
 
 Bootstrap and the controlled builder never stage, commit, or push. Review the
 resulting changes in `DYNAM-O/rust_bridge/` before committing the pre-built
@@ -114,10 +124,11 @@ files through the normal repository workflow.
 Archive it with the corresponding release record rather than committing it to
 this repository.
 
-The Rust static archive (`libdynamo_rs.a`) is an intermediate build product,
-not a distributed DYNAM-O artifact, so it is outside this gate. Publishing it
-later would require explicit archive/DWARF stripping followed by the same
-privacy scan.
+`DYNAM-O_rs` no longer declares a Rust `staticlib`, so
+`libdynamo_rs.a` is not generated. Cargo still creates an internal `.rlib` for
+the standalone CLI and Rust dependency graph; it is not copied into a runtime
+bundle, included in the release allowlist, or shipped as a DYNAM-O artifact.
+The gate nevertheless byte-scans it as an internal path-validation output.
 
 The MATLAB implementation of the MEX build remains
 `DYNAM-O/rust_bridge/build_rust_mex.m`; the toolbox controlled builder is the
@@ -200,21 +211,19 @@ git clone --recursive -b master https://github.com/preraulab/DYNAM-O_py.git
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 
-# 3. Build Rust core + CLI
+# 3. Local-development-only Rust core + CLI build
+#    Never commit or publish these native outputs.
 (cd DYNAM-O_rs/rust && cargo build --release --locked)
 
-# 4. MATLAB MEX — inside MATLAB, not the shell
+# 4. Local-development-only MATLAB MEX build — inside MATLAB, not the shell.
+#    Never commit or publish these native outputs.
 #    (cd DYNAM-O/rust_bridge; build_rust_mex)
-
-# 5. Python venv + pydynamo
-cd DYNAM-O_py
-python3 -m venv .venv && source .venv/bin/activate
-pip install --upgrade pip "maturin==1.14.1"
-(cd ../DYNAM-O/toolbox/helper_functions/multitaper_toolbox/rust && maturin develop --release)
-(cd ../DYNAM-O_rs/rust && maturin develop --release --locked --features python)
-pip install -e .
-python scripts/check_install.py
 ```
+
+Python native setup is intentionally not reproduced as a manual build recipe.
+Use the top-level controlled bootstrap **Yes** path; it creates
+`DYNAM-O_py/.venv`, installs the pinned build tools and native extensions, and
+runs the installation check under the path-remapped environment.
 
 To return an existing sub-repo to `master`:
 ```bash
@@ -347,18 +356,24 @@ question instead; the default path does not compile them.
 
 ```
 Are you writing MATLAB code or need the File Manager GUI?  →  DYNAM-O (MATLAB)
-    Want it fast?                                          →  build the 'rust' backend (~4x end-to-end, ~8x on extract)
+    Want it fast?                                          →  use the checked-in 'rust' backend
+    Publishing a rebuilt native backend?                   →  bootstrap Yes + privacy gate
     Just want the reference implementation?                →  'matlab' backend, no extra setup
 
 Are you in Python / using MNE-Python?                      →  DYNAM-O_py (pydynamo)
-    Want it fast?                                          →  build dynamo_rs as a PyO3 wheel (auto-detected)
+    Want the native extensions?                            →  bootstrap Yes + privacy gate
 
 Are you integrating Rust into your own pipeline?           →  DYNAM-O_rs (library)
-    Want a native binary with no MATLAB/Python runtime?    →  DYNAM-O_rs CLI (`dynamo extract`)
+    Want a local CLI with no MATLAB/Python runtime?        →  DYNAM-O_rs CLI (`dynamo extract`)
+    Publishing that CLI?                                   →  bootstrap Yes + privacy gate
 ```
 
-- **Most MATLAB users:** clone [`DYNAM-O`](https://github.com/preraulab/DYNAM-O), use `backend='rust'` (default).
-- **Most Python users:** clone [`DYNAM-O_py`](https://github.com/preraulab/DYNAM-O_py), let it pick up `dynamo_rs` automatically when present.
+- **Most MATLAB users:** clone
+  [`DYNAM-O`](https://github.com/preraulab/DYNAM-O) and use the checked-in
+  `backend='rust'` artifacts (the default), or fall back to `backend='matlab'`.
+- **Python users who need the native extensions:** clone this meta-repository
+  and run `./bootstrap.sh --yes` or `.\bootstrap.ps1 -Yes`; use the resulting
+  `DYNAM-O_py/.venv`.
 
 ---
 
@@ -366,8 +381,9 @@ Are you integrating Rust into your own pipeline?           →  DYNAM-O_rs (libr
 
 If you only want one of the three pieces (for example, just MATLAB or just
 Python), the per-package recipes below are available for local development.
-They are not the path for producing checked-in public artifacts; use the
-top-level bootstrap and answer Yes for that.
+Every direct Cargo or MATLAB command below is local-development-only and may
+embed build-host paths. Never commit or publish its native outputs. The
+top-level bootstrap **Yes** path is the sole distributable native build path.
 
 <details>
 <summary><strong> MATLAB (<code>DYNAM-O</code>)</strong></summary>
@@ -397,6 +413,8 @@ runDYNAMO('segment')      % runs the bundled 90-minute example on 'matlab' backe
 #### 2. (Optional) Compile the Rust core for the `'rust'` backend
 
 Requires the [Rust toolchain](https://rustup.rs):
+this direct command is for local development only, and its outputs must not be
+committed or published.
 
 ```bash
 # either clone the Rust repo as a sibling of DYNAM-O…
@@ -408,13 +426,16 @@ cargo build --release --locked
 # …or, if you cloned the meta-repo, the sibling already exists
 ```
 
-This produces `libdynamo_rs.{dylib,so,dll}` under `target/release/` and
-regenerates `include/dynamo_rs.h`. One-time; rebuild only when the Rust
-source changes.
+This produces the platform shared library
+`libdynamo_rs.{dylib,so}` / `dynamo_rs.dll` under `target/release/`, an
+internal `.rlib`, and `include/dynamo_rs.h`. It does not produce
+`libdynamo_rs.a`; the crate no longer declares a `staticlib`.
 
 #### 3. (Optional) Compile the MEX wrappers
 
-Requires a C compiler configured in MATLAB (`mex -setup C`):
+Requires a C compiler configured in MATLAB (`mex -setup C`). This direct helper
+is also local-development-only; use bootstrap **Yes** for any MEX or shared
+library that will be committed or distributed.
 
 ```matlab
 cd <workspace>/DYNAM-O/rust_bridge
@@ -461,53 +482,39 @@ merge, trim, and histograms to Rust for roughly a 1.5–10× speedup depending
 on stage. Without Rust, pydynamo falls back to scipy / scikit-image
 implementations.
 
-#### Prerequisites
+Use the controlled meta-repository build whenever installing the native Python
+extensions. It creates `DYNAM-O_py/.venv`, installs the pinned Maturin version,
+builds both native extensions under the path-remapped environment, installs
+pydynamo in editable mode, sanitizes the generated SBOMs, and runs
+`scripts/check_install.py`.
 
-- Python ≥ 3.9
-- [Rust toolchain](https://rustup.rs)
-- [maturin](https://www.maturin.rs), installed into the virtual environment below
-
-#### 1. Clone the coordinated repositories
-
-```bash
-mkdir DYNAM-O-stack && cd DYNAM-O-stack
-git clone --branch master --single-branch https://github.com/preraulab/DYNAM-O_py.git
-git clone --recursive --branch master --single-branch https://github.com/preraulab/DYNAM-O.git
-git clone --branch master --single-branch https://github.com/preraulab/DYNAM-O_rs.git
-cd DYNAM-O_py
-```
-
-#### 2. Set up a virtualenv
+macOS, Linux, WSL, or Git-Bash:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-python -m pip install --upgrade pip "maturin==1.14.1"
+git clone https://github.com/preraulab/DYNAM-O_toolbox.git
+cd DYNAM-O_toolbox
+./bootstrap.sh --yes
+source DYNAM-O_py/.venv/bin/activate
 ```
 
-#### 3. Build both native extensions
+Windows PowerShell:
 
-Build the multitaper extension first, followed by the shared DYNAM-O kernel:
-
-```bash
-python -m maturin develop --release \
-    -m ../DYNAM-O/toolbox/helper_functions/multitaper_toolbox/rust/Cargo.toml
-python -m maturin develop --release --locked --features python \
-    -m ../DYNAM-O_rs/rust/Cargo.toml
+```powershell
+git clone https://github.com/preraulab/DYNAM-O_toolbox.git
+cd DYNAM-O_toolbox
+powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Yes
+.\DYNAM-O_py\.venv\Scripts\Activate.ps1
 ```
 
-The `--features python` flag enables the PyO3 bindings in the crate; the
-non-Python Rust consumers (MATLAB MEX, standalone Rust) don't need it.
-
-#### 4. Install and verify pydynamo
-
-```bash
-python -m pip install -e .
-python scripts/check_install.py
-```
+The controlled workflow does not yet produce standalone pydynamo,
+`dynamo_rs`, or `multitaper_rs` wheels for distribution. A wheel or native
+extension produced by a direct Maturin, pip, or other PEP 517 command is not a
+controlled release artifact and must not be published as one.
 
 Optional test dependencies and suite:
 
 ```bash
+cd DYNAM-O_py
 python -m pip install -e '.[test]'
 python -m pytest tests/
 ```
@@ -521,8 +528,10 @@ comparisons:
 <details>
 <summary><strong> Rust (<code>DYNAM-O_rs</code>)</strong></summary>
 
-Standalone build of the pure-Rust kernel. Useful if you want to integrate
-`dynamo_rs` into your own Rust / C / Python project.
+Local build of the pure-Rust kernel. Useful when developing against
+`dynamo_rs` from another Rust or C project. The commands in this subsection
+are local-development-only; use the top-level bootstrap **Yes** path for any
+native artifact that will be committed or distributed.
 
 #### Prerequisites
 
@@ -535,32 +544,36 @@ git clone -b master https://github.com/preraulab/DYNAM-O_rs.git
 cd DYNAM-O_rs/rust
 ```
 
-#### 2. Build
+#### 2. Local library build
 
-Three target shapes are controlled by the crate type + feature flags:
+The crate declares a shared `cdylib` and an internal Rust `rlib`:
 
 ```bash
-# Rust library (rlib) + C library (cdylib + staticlib), no Python
 cargo build --release --locked
-
-# PyO3 Python extension (requires maturin and a Python venv)
-maturin build --release --locked --features python
-# or, for in-place development:
-maturin develop --release --locked --features python
 ```
 
 `cargo build --release --locked` produces:
 
-- `target/release/libdynamo_rs.{dylib,so,a}` (macOS / Linux; `.dll` + `.dll.lib` on Windows).
+- The platform shared library (`libdynamo_rs.{dylib,so}` or
+  `dynamo_rs.dll`). Windows may also produce a link-time import library; it is
+  not a runtime artifact.
+- An internal `.rlib` used by the standalone CLI and downstream Rust builds.
+  It is not shipped or included in the controlled release allowlist.
 - `include/dynamo_rs.h` — regenerated on each build via `build.rs` + `cbindgen`.
 
-MEX wrappers in [`DYNAM-O/rust_bridge/`](https://github.com/preraulab/DYNAM-O/tree/master/rust_bridge) link against these artifacts at build time.
+No `libdynamo_rs.a` is produced because the crate no longer declares a
+`staticlib`. MEX wrappers in
+[`DYNAM-O/rust_bridge/`](https://github.com/preraulab/DYNAM-O/tree/master/rust_bridge)
+dynamically link the platform shared library.
 
-#### 3. Regenerate the C header manually (rarely needed)
+Python native extensions must be installed through the controlled bootstrap
+**Yes** path described above. Controlled standalone wheels are not yet a
+supported release artifact.
 
-```bash
-cargo run --locked --bin cbindgen -- --output include/dynamo_rs.h
-```
+#### 3. C header
+
+The generated `rust/include/dynamo_rs.h` is tracked. Cargo's `build.rs`
+refreshes it through `cbindgen` when relevant Rust inputs change.
 
 #### 4. Use from Rust
 
@@ -573,7 +586,10 @@ dynamo_rs = { git = "https://github.com/preraulab/DYNAM-O_rs", branch = "master"
 
 Then `use dynamo_rs::...;` — see the public items in `src/lib.rs`.
 
-#### 5. Build the standalone `dynamo` CLI (no MATLAB, no Python)
+#### 5. Build a local standalone `dynamo` CLI (no MATLAB or Python)
+
+This direct Cargo build is for local development only. To distribute the CLI,
+build it through the top-level bootstrap **Yes** path and privacy gate.
 
 ```bash
 cargo build --release --locked --bin dynamo

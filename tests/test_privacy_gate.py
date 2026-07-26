@@ -39,6 +39,62 @@ class PrivacyGateTests(unittest.TestCase):
             self.assertTrue(any("ASCII absolute Windows" in item for item in findings))
             self.assertTrue(any("UTF-16LE absolute Windows" in item for item in findings))
 
+    def test_rejects_windows_unc_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "leaky.pdb"
+            unc = r"\\server\private-share\project\src\lib.rs"
+            artifact.write_bytes(unc.encode() + b"\0" + unc.encode("utf-16-le"))
+
+            findings = scan_artifacts([artifact], [])
+
+            self.assertTrue(any("ASCII absolute Windows UNC" in item for item in findings))
+            self.assertTrue(
+                any("UTF-16LE absolute Windows UNC" in item for item in findings)
+            )
+
+    def test_rejects_extended_windows_unc_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "extended-unc.pdb"
+            unc = r"\\?\UNC\server\share\project\src\lib.rs"
+            artifact.write_bytes(unc.encode() + b"\0" + unc.encode("utf-16-le"))
+
+            findings = scan_artifacts([artifact], [])
+
+            self.assertTrue(any("ASCII absolute Windows UNC" in item for item in findings))
+            self.assertTrue(
+                any("UTF-16LE absolute Windows UNC" in item for item in findings)
+            )
+
+    def test_rejects_generic_temporary_paths_but_allows_virtual_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            leaky = root / "leaky.bin"
+            clean = root / "clean.bin"
+            leaky.write_bytes(
+                b"/tmp/private-build/src/lib.rs\0/var/tmp/other-build/src/lib.rs"
+            )
+            clean.write_bytes(b"/build/temporary/src/lib.rs")
+
+            self.assertTrue(scan_artifacts([leaky], []))
+            self.assertEqual(scan_artifacts([clean], []), [])
+
+    def test_sensitive_path_covers_raw_and_resolved_aliases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            physical = root / "physical"
+            physical.mkdir()
+            alias = root / "alias"
+            alias.symlink_to(physical, target_is_directory=True)
+            artifact = root / "leaky.bin"
+            artifact.write_bytes(
+                str(alias).encode() + b"\0" + str(physical.resolve()).encode()
+            )
+
+            findings = scan_artifacts([artifact], [str(alias)])
+
+            self.assertTrue(any(str(alias) in item for item in findings))
+            self.assertTrue(any(str(physical.resolve()) in item for item in findings))
+
     def test_allows_sanitized_file_uri(self):
         with tempfile.TemporaryDirectory() as directory:
             artifact = Path(directory) / "sbom.json"

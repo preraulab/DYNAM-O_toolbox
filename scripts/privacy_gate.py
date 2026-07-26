@@ -20,19 +20,29 @@ GENERIC_PATHS = (
     b"/home/",
     b"/homes/",
     b"/root/",
+    b"/tmp/",
+    b"/private/tmp/",
+    b"/var/tmp/",
+    b"/var/folders/",
+    b"/private/var/folders/",
     b"C:\\Users\\",
     b"C:/Users/",
 )
 
 
 def _path_variants(path: str) -> set[bytes]:
-    value = str(Path(path).expanduser().resolve())
-    variants = {value, value.replace("\\", "/")}
-    if os.name == "nt":
-        variants.add(value.replace("/", "\\"))
+    raw = os.path.expanduser(path).rstrip("/\\")
+    variants = {
+        raw,
+        os.path.abspath(raw).rstrip("/\\"),
+        os.path.realpath(raw).rstrip("/\\"),
+    }
+    variants.update(value.replace("\\", "/") for value in list(variants))
+    variants.update(value.replace("/", "\\") for value in list(variants))
     return {
         encoded
         for variant in variants
+        if variant
         for encoded in (variant.encode(), variant.encode("utf-16-le"))
     }
 
@@ -72,6 +82,25 @@ def scan_bytes(data: bytes, label: str, needles: set[bytes]) -> list[str]:
             continue
         findings.append(
             f"{label}: UTF-16LE absolute Windows path "
+            f"{match.group(0).decode('utf-16-le', errors='replace')!r}"
+        )
+    for match in re.finditer(
+        rb"\\\\[A-Za-z0-9.?_-]+\\[A-Za-z0-9$._ -]+"
+        rb"(?:\\[ -~]{1,300})?",
+        data,
+    ):
+        findings.append(
+            f"{label}: ASCII absolute Windows UNC path "
+            f"{match.group(0).decode(errors='replace')!r}"
+        )
+    for match in re.finditer(
+        rb"\\\x00\\\x00(?:[A-Za-z0-9.?_-]\x00)+"
+        rb"\\\x00(?:[A-Za-z0-9$._ -]\x00)+"
+        rb"(?:\\\x00(?:[ -~]\x00){1,300})?",
+        data,
+    ):
+        findings.append(
+            f"{label}: UTF-16LE absolute Windows UNC path "
             f"{match.group(0).decode('utf-16-le', errors='replace')!r}"
         )
     return findings
