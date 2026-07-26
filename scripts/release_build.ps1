@@ -9,7 +9,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Split-Path -Parent $scriptDirectory
 $pythonExecutable = $null
 $pythonPrefix = @()
 
@@ -52,7 +53,6 @@ if ($Help) {
     $releaseArguments += '--help'
 }
 
-& $pythonExecutable @pythonPrefix `
-    (Join-Path $repoRoot 'release_build.py') `
-    @releaseArguments
+Set-Location $repoRoot
+& $pythonExecutable @pythonPrefix -m scripts.release_build @releaseArguments
 exit $LASTEXITCODE

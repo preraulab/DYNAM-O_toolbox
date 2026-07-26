@@ -17,7 +17,7 @@ from typing import Dict, Iterable, Optional, Sequence
 from scripts.privacy_gate import scan_artifacts, scan_bytes, sensitive_needles
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 REPOSITORIES = ("DYNAM-O_rs", "DYNAM-O", "DYNAM-O_py")
 CANONICAL_REPOSITORY_URLS = {
     name: f"https://github.com/preraulab/{name}.git" for name in REPOSITORIES

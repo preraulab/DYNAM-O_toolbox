@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import call, patch
 
-from release_build import (
+from scripts.release_build import (
     MEX_WRAPPERS,
     UNIT_SEPARATOR,
     other_platform_binaries,
@@ -19,7 +19,7 @@ from release_build import (
 
 
 class ReleaseBuildTests(unittest.TestCase):
-    @patch("release_build.subprocess.run")
+    @patch("scripts.release_build.subprocess.run")
     def test_run_preserves_leading_submodule_status_marker(self, subprocess_run):
         subprocess_run.return_value = subprocess.CompletedProcess(
             args=("git",),
@@ -31,8 +31,8 @@ class ReleaseBuildTests(unittest.TestCase):
 
         self.assertEqual(output, " 0123456789abcdef dependency")
 
-    @patch("release_build.require_clean")
-    @patch("release_build.git")
+    @patch("scripts.release_build.require_clean")
+    @patch("scripts.release_build.git")
     def test_validate_master_uses_read_only_git_commands(self, git, require_clean):
         git.side_effect = (
             "https://github.com/preraulab/DYNAM-O.git",
@@ -69,8 +69,8 @@ class ReleaseBuildTests(unittest.TestCase):
             ],
         )
 
-    @patch("release_build.require_clean")
-    @patch("release_build.git")
+    @patch("scripts.release_build.require_clean")
+    @patch("scripts.release_build.git")
     def test_validate_master_rejects_non_master_branch(self, git, _require_clean):
         git.side_effect = (
             "https://github.com/preraulab/DYNAM-O.git",
@@ -80,16 +80,19 @@ class ReleaseBuildTests(unittest.TestCase):
             validate_master(Path("/workspace/DYNAM-O"))
         self.assertEqual(git.call_count, 2)
 
-    @patch("release_build.require_clean")
-    @patch("release_build.git", return_value="https://github.com/someone/DYNAM-O.git")
+    @patch("scripts.release_build.require_clean")
+    @patch(
+        "scripts.release_build.git",
+        return_value="https://github.com/someone/DYNAM-O.git",
+    )
     def test_validate_master_rejects_noncanonical_origin(
         self, _git, _require_clean
     ):
         with self.assertRaisesRegex(RuntimeError, "expected preraulab/DYNAM-O"):
             validate_master(Path("/workspace/DYNAM-O"))
 
-    @patch("release_build.require_clean")
-    @patch("release_build.git")
+    @patch("scripts.release_build.require_clean")
+    @patch("scripts.release_build.git")
     def test_validate_master_rejects_head_not_at_live_origin(
         self, git, _require_clean
     ):
@@ -102,8 +105,8 @@ class ReleaseBuildTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "current origin/master"):
             validate_master(Path("/workspace/DYNAM-O"))
 
-    @patch("release_build.require_clean")
-    @patch("release_build.git")
+    @patch("scripts.release_build.require_clean")
+    @patch("scripts.release_build.git")
     def test_validate_master_rejects_submodule_markers(self, git, _require_clean):
         for marker in ("-", "+", "U"):
             with self.subTest(marker=marker):
@@ -118,7 +121,7 @@ class ReleaseBuildTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "recorded gitlinks"):
                     validate_master(Path("/workspace/DYNAM-O"))
 
-    @patch("release_build.git")
+    @patch("scripts.release_build.git")
     def test_submodule_gitlinks_preserves_first_sha(self, git):
         git.return_value = (
             " 0123456789abcdef first\n"
@@ -143,7 +146,7 @@ class ReleaseBuildTests(unittest.TestCase):
             other = mex_dir / "old.mexw64"
             other.write_bytes(b"C:\\Users\\builder\\source")
 
-            with patch("release_build.ROOT", root):
+            with patch("scripts.release_build.ROOT", root):
                 byte_scan_only = other_platform_binaries([current])
 
             self.assertEqual(byte_scan_only, [other])
@@ -208,8 +211,8 @@ class ReleaseBuildTests(unittest.TestCase):
                 sbom.parent.mkdir(parents=True)
                 sbom.write_text("{}")
 
-            with patch("release_build.ROOT", root), patch(
-                "release_build.sys.platform", "linux"
+            with patch("scripts.release_build.ROOT", root), patch(
+                "scripts.release_build.sys.platform", "linux"
             ):
                 artifacts = platform_artifacts(venv)
 

@@ -257,5 +257,5 @@ if (-not $rebuild) {
 }
 
 Info 'Starting the controlled native release build...'
-& (Join-Path $repoRoot 'release_build.ps1')
+& (Join-Path $repoRoot 'scripts\release_build.ps1')
 exit $LASTEXITCODE

@@ -19,7 +19,7 @@ POWERSHELLS = list(
 class ReleaseLauncherTests(unittest.TestCase):
     def test_posix_launcher_locates_python(self):
         result = subprocess.run(
-            [str(ROOT / "release_build.sh"), "--help"],
+            [str(ROOT / "scripts" / "release_build.sh"), "--help"],
             cwd=ROOT,
             check=True,
             capture_output=True,
@@ -36,7 +36,7 @@ class ReleaseLauncherTests(unittest.TestCase):
                         powershell,
                         "-NoProfile",
                         "-File",
-                        str(ROOT / "release_build.ps1"),
+                        str(ROOT / "scripts" / "release_build.ps1"),
                         "-Help",
                     ],
                     cwd=ROOT,
@@ -98,7 +98,9 @@ exit 0
         )
         fake_git.chmod(0o755)
 
-        launcher = self.root / "release_build.sh"
+        scripts = self.root / "scripts"
+        scripts.mkdir()
+        launcher = scripts / "release_build.sh"
         launcher.write_text(
             """#!/bin/sh
 printf '%s\n' delegated > "$RELEASE_MARKER"
@@ -189,7 +191,7 @@ exit "${RELEASE_EXIT_CODE:-0}"
         self.assertIn("[switch]$Yes", script)
         self.assertNotIn("[switch]$RustOnly", script)
         self.assertNotIn("[switch]$Release", script)
-        self.assertIn("'release_build.ps1'", script)
+        self.assertIn("'scripts\\release_build.ps1'", script)
 
 
 if __name__ == "__main__":

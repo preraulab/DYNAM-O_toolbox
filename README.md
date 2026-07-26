@@ -78,9 +78,8 @@ After synchronizing the repositories, bootstrap asks one question:
   can vary, so a particular OS/architecture may need a controlled rebuild
   or may use the corresponding pure MATLAB/Python fallback.
 - **Yes** enters the controlled build path. Bootstrap internally invokes
-  `release_build.sh` on macOS/Linux or `release_build.ps1` on Windows; that
-  launcher locates Python 3.9 or newer and passes control to the common
-  `release_build.py` implementation.
+  the platform launcher under `scripts/`; it locates Python 3.9 or newer and
+  passes control to the common `scripts/release_build.py` implementation.
 
 Rerun the same bootstrap command whenever the moving `master` heads change.
 It is both the install and update path. For an unattended controlled build,
@@ -774,8 +773,9 @@ orchestration files:
 DYNAM-O_toolbox/
 ├── README.md              ← you are here
 ├── bootstrap.sh / .ps1    (public install/update entrypoints)
-├── release_build.sh / .ps1 (internal platform dispatchers)
-├── release_build.py        (common controlled builder)
+├── scripts/
+│   ├── release_build.sh / .ps1 (internal platform dispatchers)
+│   └── release_build.py        (common controlled builder)
 ├── DYNAM-O/                (MATLAB toolbox, GUI, File Manager)
 ├── DYNAM-O_rs/             (pure-Rust kernel)
 └── DYNAM-O_py/             (Python port / pydynamo)

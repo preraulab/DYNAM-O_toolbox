@@ -2,7 +2,8 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 VERSION_CHECK='import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)'
 PYTHON_COMMAND=()
 
@@ -22,4 +23,5 @@ else
     exit 1
 fi
 
-exec "${PYTHON_COMMAND[@]}" "$REPO_ROOT/release_build.py" "$@"
+cd "$REPO_ROOT"
+exec "${PYTHON_COMMAND[@]}" -m scripts.release_build "$@"

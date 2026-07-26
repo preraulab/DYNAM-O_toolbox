@@ -187,4 +187,4 @@ fi
 
 echo
 info "Starting the controlled release build..."
-exec "$REPO_ROOT/release_build.sh"
+exec "$REPO_ROOT/scripts/release_build.sh"
