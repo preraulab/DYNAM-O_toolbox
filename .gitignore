@@ -1,3 +1,8 @@
 *.DS_store
 *.asv
 .aider*
+
+# Bootstrap-managed independent repositories
+/DYNAM-O/
+/DYNAM-O_rs/
+/DYNAM-O_py/
