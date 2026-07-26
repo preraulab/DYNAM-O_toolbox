@@ -6,3 +6,6 @@
 /DYNAM-O/
 /DYNAM-O_rs/
 /DYNAM-O_py/
+
+# Generated audit record from release_build.py (archive with the release).
+/release-build-manifest.json
