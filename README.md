@@ -146,7 +146,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 
 # 3. Build Rust core + CLI
-(cd DYNAM-O_rs/rust && cargo build --release && cargo build --release --bin dynamo)
+(cd DYNAM-O_rs/rust && cargo build --release)
 
 # 4. MATLAB MEX — inside MATLAB, not the shell
 #    (cd DYNAM-O/rust_bridge; build_rust_mex)
