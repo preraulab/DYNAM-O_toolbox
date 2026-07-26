@@ -23,10 +23,19 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $repoRoot
 
+. (Join-Path $repoRoot 'scripts\Configure-BuildPaths.ps1')
+Enable-BuildPathRemapping $repoRoot
+
 function Info($m) { Write-Host "[bootstrap] $m" -ForegroundColor Cyan }
 function OK($m)   { Write-Host "[bootstrap] $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "[bootstrap] $m" -ForegroundColor Yellow }
 function Err($m)  { Write-Host "[bootstrap] $m" -ForegroundColor Red }
+
+function Assert-NativeSuccess($step) {
+    if ($LASTEXITCODE -ne 0) {
+        throw "$step failed with exit code $LASTEXITCODE"
+    }
+}
 
 function Confirm-Step($prompt) {
     if ($Yes) { return $true }
@@ -122,9 +131,9 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
 }
 
 # ---------- 3. Build the Rust core + CLI ----------
-Info "Building dynamo_rs + standalone CLI (cargo build --release)..."
+Info "Building dynamo_rs + standalone CLI (cargo build --release --locked)..."
 Push-Location "DYNAM-O_rs\rust"
-cargo build --release
+cargo build --release --locked
 if ($LASTEXITCODE -ne 0) { Err "cargo build failed"; Pop-Location; exit $LASTEXITCODE }
 Pop-Location
 $cliBin = Join-Path $repoRoot 'DYNAM-O_rs\rust\target\release\dynamo.exe'
@@ -170,8 +179,8 @@ if ($matlab) {
         $devRoot = Join-Path $repoRoot 'DYNAM-O'
         $devBranch = (git -C $devRoot symbolic-ref --short HEAD 2>$null)
         if (-not $devBranch) { $devBranch = 'HEAD' }
-        $status = git -C $devRoot status --porcelain -- rust_bridge
-        $pattern = '\.(mexa64|mexmaci64|mexmaca64|mexw64|dylib|so|dll)$'
+        $status = git -C $devRoot status --porcelain --untracked-files=all -- rust_bridge
+        $pattern = '\.(mexa64|mexmaci64|mexmaca64|mexw64|dylib|so|dll|npy)$'
         $changed = @()
         foreach ($line in $status) {
             $file = ($line -replace '^...', '').Trim()
@@ -180,29 +189,61 @@ if ($matlab) {
         if ($changed.Count -eq 0) {
             Info 'No MEX / shared-lib changes detected under rust_bridge/ — nothing to commit.'
         } else {
-            Write-Host ''
-            Info 'Freshly-built platform binaries under DYNAM-O\rust_bridge\:'
-            $changed | ForEach-Object { Write-Host "    $_" }
-            Write-Host ''
-            if (Confirm-GitWrite "Commit these binaries on the current branch so other users don't need to rebuild?") {
-                $platform = "Windows $env:PROCESSOR_ARCHITECTURE"
-                $rsSha = (git -C (Join-Path $repoRoot 'DYNAM-O_rs') rev-parse --short HEAD 2>$null)
-                if (-not $rsSha) { $rsSha = 'unknown' }
-                # Branch safety: pre-built binaries should land on master,
-                # not whatever branch the contributor happens to be on.
-                $continueMexPush = $true
-                if ($devBranch -ne 'master') {
-                    Warn "DYNAM-O is on branch '$devBranch', not 'master'."
-                    Warn "Platform binaries are normally committed to master so the"
-                    Warn "whole team picks them up. Pushing to '$devBranch' may not be what you want."
-                    if (-not (Confirm-GitWrite "Continue and commit to '$devBranch' anyway?")) {
-                        Info 'Skipping commit — checkout master first if you want to contribute binaries.'
-                        $continueMexPush = $false
-                    }
+            $privacyPython = Get-Command python -ErrorAction SilentlyContinue
+            if ($null -eq $privacyPython) {
+                $privacyPython = Get-Command python3 -ErrorAction SilentlyContinue
+            }
+            $privacyPassed = $false
+            if ($privacyPython) {
+                $privacyArtifacts = @(
+                    Get-ChildItem -LiteralPath (Join-Path $devRoot 'rust_bridge') -File -Filter '*.mexw64'
+                    Get-Item -LiteralPath (Join-Path $devRoot 'rust_bridge\dynamo_rs.dll') -ErrorAction SilentlyContinue
+                    Get-ChildItem -LiteralPath (Join-Path $devRoot 'rust_bridge\data_matlab_filters') -File -Filter '*.npy' -ErrorAction SilentlyContinue
+                )
+                if ($privacyArtifacts.Count -eq 0) {
+                    Warn 'No current-platform artifacts were found for the privacy gate.'
+                } else {
+                    & $privacyPython.Source `
+                        (Join-Path $repoRoot 'scripts\privacy_gate.py') `
+                        --sensitive-path $repoRoot `
+                        --sensitive-path $env:USERPROFILE `
+                        --sensitive-path ([System.IO.Path]::GetTempPath()) `
+                        --sensitive-path $(if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }) `
+                        --sensitive-path $(if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-Path $env:USERPROFILE '.rustup' }) `
+                        @privacyArtifacts
+                    $privacyPassed = ($LASTEXITCODE -eq 0)
                 }
-                if ($continueMexPush) {
-                    foreach ($f in $changed) { git -C $devRoot add -- $f }
-                    $msg = @"
+            } else {
+                Warn 'Python is required to privacy-check binaries before committing.'
+            }
+            if (-not $privacyPassed) {
+                Warn 'The binaries were built but did not pass the mandatory privacy gate.'
+                Warn 'They will not be offered for commit.'
+            }
+            if ($privacyPassed) {
+                Write-Host ''
+                Info 'Freshly-built platform binaries under DYNAM-O\rust_bridge\:'
+                $changed | ForEach-Object { Write-Host "    $_" }
+                Write-Host ''
+                if (Confirm-GitWrite "Commit these binaries on the current branch so other users don't need to rebuild?") {
+                    $platform = "Windows $env:PROCESSOR_ARCHITECTURE"
+                    $rsSha = (git -C (Join-Path $repoRoot 'DYNAM-O_rs') rev-parse --short HEAD 2>$null)
+                    if (-not $rsSha) { $rsSha = 'unknown' }
+                    # Branch safety: pre-built binaries should land on master,
+                    # not whatever branch the contributor happens to be on.
+                    $continueMexPush = $true
+                    if ($devBranch -ne 'master') {
+                        Warn "DYNAM-O is on branch '$devBranch', not 'master'."
+                        Warn "Platform binaries are normally committed to master so the"
+                        Warn "whole team picks them up. Pushing to '$devBranch' may not be what you want."
+                        if (-not (Confirm-GitWrite "Continue and commit to '$devBranch' anyway?")) {
+                            Info 'Skipping commit — checkout master first if you want to contribute binaries.'
+                            $continueMexPush = $false
+                        }
+                    }
+                    if ($continueMexPush) {
+                        foreach ($f in $changed) { git -C $devRoot add -- $f }
+                        $msg = @"
 chore: MEX binaries for $platform (dynamo_rs @ $rsSha)
 
 Pre-built artifacts committed from a bootstrap.ps1 run on $platform so
@@ -211,17 +252,18 @@ toolchain.
 
 dynamo_rs source SHA: $rsSha
 "@
-                    git -C $devRoot commit -m $msg
-                    if (Confirm-GitWrite "Push to origin/$devBranch?") {
-                        git -C $devRoot push origin $devBranch
-                        if ($LASTEXITCODE -eq 0) {
-                            OK "Pushed MEX binaries to origin/$devBranch."
+                        git -C $devRoot commit -m $msg
+                        if (Confirm-GitWrite "Push to origin/$devBranch?") {
+                            git -C $devRoot push origin $devBranch
+                            if ($LASTEXITCODE -eq 0) {
+                                OK "Pushed MEX binaries to origin/$devBranch."
+                            } else {
+                                Warn 'Push failed (no permission, network, or non-fast-forward).'
+                                Warn 'The commit is in your local DYNAM-O — push it manually when ready.'
+                            }
                         } else {
-                            Warn 'Push failed (no permission, network, or non-fast-forward).'
-                            Warn 'The commit is in your local DYNAM-O — push it manually when ready.'
+                            OK "Committed locally. Push with:  cd DYNAM-O; git push origin $devBranch"
                         }
-                    } else {
-                        OK "Committed locally. Push with:  cd DYNAM-O; git push origin $devBranch"
                     }
                 }
             }
@@ -251,24 +293,31 @@ if ($py) {
         $pyBin = Join-Path $venv 'Scripts\python.exe'
         $pip = Join-Path $venv 'Scripts\pip.exe'
         Info "Installing pip + maturin in the venv..."
-        & $pip install --quiet --upgrade pip maturin
+        & $pip install --quiet --upgrade pip "maturin==1.14.1"
+        Assert-NativeSuccess 'pip install'
         Info "Building multitaper_rs Python extension (maturin develop --release)..."
         Push-Location "DYNAM-O\toolbox\helper_functions\multitaper_toolbox\rust"
         $env:VIRTUAL_ENV = $venv
         $env:CONDA_PREFIX = ''
         & $pyBin -m maturin develop --release
+        Assert-NativeSuccess 'multitaper_rs maturin build'
         Pop-Location
-        Info "Building dynamo_rs Python extension (maturin develop --release)..."
+        Invoke-SbomSanitizer $repoRoot $pyBin $venv 'multitaper_rs'
+        Info "Building dynamo_rs Python extension (maturin develop --release --locked)..."
         Push-Location "DYNAM-O_rs\rust"
         $env:VIRTUAL_ENV = $venv
         $env:CONDA_PREFIX = ''
-        & $pyBin -m maturin develop --release --features python
+        & $pyBin -m maturin develop --release --locked --features python
+        Assert-NativeSuccess 'dynamo_rs maturin build'
         Pop-Location
+        Invoke-SbomSanitizer $repoRoot $pyBin $venv 'dynamo_rs'
         Info "Installing pydynamo itself (pip install -e .)..."
         Push-Location "DYNAM-O_py"
         & $pip install --quiet -e .
+        Assert-NativeSuccess 'pydynamo editable install'
         Info "Checking the accelerated Python installation..."
         & $pyBin scripts\check_install.py
+        Assert-NativeSuccess 'pydynamo installation check'
         Pop-Location
         OK "pydynamo and both native extensions installed into $venv."
     }

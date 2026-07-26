@@ -75,6 +75,43 @@ Flags: `-Yes` to accept non-Git setup prompts non-interactively,
 e.g. `powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Yes`.
 Commits and pushes always require explicit confirmation.
 
+## Controlled release build
+
+Use the top-level release builder for binaries that may be committed or
+published:
+
+```bash
+python3 release_build.py       # macOS / Linux
+py -3 .\release_build.py       # Windows
+```
+
+This is intentionally stricter than the interactive bootstrap. It requires
+clean checkouts, fetches and fast-forwards `DYNAM-O`, `DYNAM-O_rs`, and
+`DYNAM-O_py` to the current `origin/master` tips, then records the three
+resolved SHAs plus the unchanged toolbox orchestrator SHA in
+`release-build-manifest.json`. It applies canonical Rust
+source-path remapping to the Cargo, MATLAB MEX, and Maturin builds, uses the
+tracked Cargo lockfile, pins Maturin, sanitizes generated SBOMs, and rejects
+artifacts containing build-machine paths.
+
+The build fails if MATLAB, the SBOM sanitizer, an expected platform artifact,
+or any privacy check is missing. It never stages, commits, or pushes. Review
+the resulting changes in `DYNAM-O/rust_bridge/` before committing the
+pre-built files.
+
+`release-build-manifest.json` is an ignored audit output, not a source file.
+Archive it with the corresponding release record rather than committing it to
+this repository.
+
+The Rust static archive (`libdynamo_rs.a`) is an intermediate build product,
+not a distributed DYNAM-O artifact, so it is outside this gate. Publishing it
+later would require explicit archive/DWARF stripping followed by the same
+privacy scan.
+
+The MATLAB implementation of the MEX build remains
+`DYNAM-O/rust_bridge/build_rust_mex.m`; the toolbox release builder is the
+single top-level coordinator that invokes it with the controlled environment.
+
 <details>
 <summary><strong>SSH vs HTTPS</strong></summary>
 
@@ -117,7 +154,9 @@ If anything fails, skip to the manual per-language sections below.
 <details>
 <summary><strong>Manual equivalent (if you'd rather not run the script)</strong></summary>
 
-The bootstrap is a convenience wrapper — everything it does can be run by hand:
+The bootstrap is a convenience wrapper — everything it does can be run by
+hand for local development. Use `release_build.py`, not these manual commands,
+for artifacts that will be distributed:
 
 ```bash
 # 1. Clone each sub-repo WITH submodules on master.
@@ -146,7 +185,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 
 # 3. Build Rust core + CLI
-(cd DYNAM-O_rs/rust && cargo build --release)
+(cd DYNAM-O_rs/rust && cargo build --release --locked)
 
 # 4. MATLAB MEX — inside MATLAB, not the shell
 #    (cd DYNAM-O/rust_bridge; build_rust_mex)
@@ -154,9 +193,9 @@ source "$HOME/.cargo/env"
 # 5. Python venv + pydynamo
 cd DYNAM-O_py
 python3 -m venv .venv && source .venv/bin/activate
-pip install --upgrade pip maturin
+pip install --upgrade pip "maturin==1.14.1"
 (cd ../DYNAM-O/toolbox/helper_functions/multitaper_toolbox/rust && maturin develop --release)
-(cd ../DYNAM-O_rs/rust && maturin develop --release --features python)
+(cd ../DYNAM-O_rs/rust && maturin develop --release --locked --features python)
 pip install -e .
 python scripts/check_install.py
 ```
@@ -175,7 +214,7 @@ git submodule update --init --recursive
 <details>
 <summary><strong>Share pre-built binaries (contributors)</strong></summary>
 
-The MATLAB `'rust'` backend needs a MEX binary for *each* platform it runs on (`.mexmaca64` for Apple Silicon, `.mexmaci64` for Intel Mac, `.mexa64` for Linux, `.mexw64` for Windows). Each MEX also needs `libdynamo_rs.{dylib,so,dll}` sitting next to it — `build_rust_mex` now copies the shared library into `rust_bridge/` and embeds a loader-relative rpath, so the pair is fully relocatable once committed.
+The MATLAB `'rust'` backend needs a MEX binary for *each* platform it runs on (`.mexmaca64` for Apple Silicon, `.mexmaci64` for Intel Mac, `.mexa64` for Linux, `.mexw64` for Windows). Each MEX also needs `libdynamo_rs.{dylib,so,dll}` and `data_matlab_filters/` sitting next to it — `build_rust_mex` copies the runtime files into `rust_bridge/` and embeds a loader-relative rpath, so the bundle is fully relocatable once committed.
 
 Strategy: **each platform-owner runs the bootstrap once, consents to commit + push their binaries, and then anyone on that same platform can clone-and-run with no MATLAB/Rust toolchain.**
 
@@ -348,7 +387,7 @@ Requires the [Rust toolchain](https://rustup.rs):
 cd ..
 git clone -b master https://github.com/preraulab/DYNAM-O_rs.git
 cd DYNAM-O_rs/rust
-cargo build --release
+cargo build --release --locked
 
 # …or, if you cloned the meta-repo, the sibling already exists
 ```
@@ -366,9 +405,9 @@ cd <workspace>/DYNAM-O/rust_bridge
 build_rust_mex
 ```
 
-Produces four platform-specific MEX files in `rust_bridge/`:
-`extract_tfpeaks_mex.*`, `mask_spectrogram_mex.*`, `refine_peaks_mex.*`,
-`tfpeak_histogram_mex.*`. Extension per platform: `.mexmaca64` (Apple
+Produces ten platform-specific MEX files in `rust_bridge/`, corresponding to
+the ten C wrappers in that directory. Extension per platform:
+`.mexmaca64` (Apple
 Silicon), `.mexmaci64` (Intel Mac), `.mexa64` (Linux), `.mexw64` (Windows).
 
 Full per-platform build guide, troubleshooting, and cross-platform
@@ -426,7 +465,7 @@ cd DYNAM-O_py
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-python -m pip install --upgrade pip maturin
+python -m pip install --upgrade pip "maturin==1.14.1"
 ```
 
 #### 3. Build both native extensions
@@ -436,7 +475,7 @@ Build the multitaper extension first, followed by the shared DYNAM-O kernel:
 ```bash
 python -m maturin develop --release \
     -m ../DYNAM-O/toolbox/helper_functions/multitaper_toolbox/rust/Cargo.toml
-python -m maturin develop --release --features python \
+python -m maturin develop --release --locked --features python \
     -m ../DYNAM-O_rs/rust/Cargo.toml
 ```
 
@@ -471,7 +510,7 @@ Standalone build of the pure-Rust kernel. Useful if you want to integrate
 
 #### Prerequisites
 
-- [Rust toolchain](https://rustup.rs) (≥ 1.70)
+- [Rust toolchain](https://rustup.rs), pinned by `rust-toolchain.toml`
 
 #### 1. Clone
 
@@ -486,15 +525,15 @@ Three target shapes are controlled by the crate type + feature flags:
 
 ```bash
 # Rust library (rlib) + C library (cdylib + staticlib), no Python
-cargo build --release
+cargo build --release --locked
 
 # PyO3 Python extension (requires maturin and a Python venv)
-maturin build --release --features python
+maturin build --release --locked --features python
 # or, for in-place development:
-maturin develop --release --features python
+maturin develop --release --locked --features python
 ```
 
-`cargo build --release` produces:
+`cargo build --release --locked` produces:
 
 - `target/release/libdynamo_rs.{dylib,so,a}` (macOS / Linux; `.dll` + `.dll.lib` on Windows).
 - `include/dynamo_rs.h` — regenerated on each build via `build.rs` + `cbindgen`.
@@ -504,7 +543,7 @@ MEX wrappers in [`DYNAM-O/rust_bridge/`](https://github.com/preraulab/DYNAM-O/tr
 #### 3. Regenerate the C header manually (rarely needed)
 
 ```bash
-cargo run --bin cbindgen -- --output include/dynamo_rs.h
+cargo run --locked --bin cbindgen -- --output include/dynamo_rs.h
 ```
 
 #### 4. Use from Rust
@@ -521,7 +560,7 @@ Then `use dynamo_rs::...;` — see the public items in `src/lib.rs`.
 #### 5. Build the standalone `dynamo` CLI (no MATLAB, no Python)
 
 ```bash
-cargo build --release --bin dynamo
+cargo build --release --locked --bin dynamo
 ./target/release/dynamo extract \
     --spect  spect.npy  \
     --stimes stimes.npy \

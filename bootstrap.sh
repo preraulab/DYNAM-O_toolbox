@@ -24,6 +24,11 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
+# All Rust and Maturin builds inherit privacy-preserving source mappings.
+# shellcheck source=scripts/configure_build_paths.sh
+source "$REPO_ROOT/scripts/configure_build_paths.sh"
+configure_build_paths "$REPO_ROOT"
+
 # ---------- colors + helpers ----------
 if [ -t 1 ]; then
     C_BLUE='\033[1;34m'; C_YLW='\033[1;33m'; C_RED='\033[1;31m'
@@ -235,8 +240,8 @@ else
 fi
 
 # ---------- 3. Build the Rust core + CLI ----------
-info "Building dynamo_rs + standalone CLI (cargo build --release)..."
-(cd DYNAM-O_rs/rust && cargo build --release)
+info "Building dynamo_rs + standalone CLI (cargo build --release --locked)..."
+(cd DYNAM-O_rs/rust && cargo build --release --locked)
 CLI_BIN="$REPO_ROOT/DYNAM-O_rs/rust/target/release/dynamo"
 ok "Rust library + CLI built: $CLI_BIN"
 
@@ -289,36 +294,74 @@ if [ -n "$MATLAB_BIN" ]; then
     if $MEX_BUILT; then
         MEX_DIR="$REPO_ROOT/DYNAM-O/rust_bridge"
         DEV_HEAD_BRANCH="$(git -C "$REPO_ROOT/DYNAM-O" symbolic-ref --short HEAD 2>/dev/null || echo 'HEAD')"
-        CHANGED=$(git -C "$REPO_ROOT/DYNAM-O" status --porcelain -- rust_bridge \
+        CHANGED=$(git -C "$REPO_ROOT/DYNAM-O" status --porcelain --untracked-files=all -- rust_bridge \
                   | awk '{print $NF}' \
-                  | grep -E '\.(mexa64|mexmaci64|mexmaca64|mexw64|dylib|so|dll)$' || true)
+                  | grep -E '\.(mexa64|mexmaci64|mexmaca64|mexw64|dylib|so|dll|npy)$' || true)
         if [ -z "$CHANGED" ]; then
             info "No MEX / shared-lib changes detected under rust_bridge/ — nothing to commit."
         else
-            echo
-            info "Freshly-built platform binaries under DYNAM-O/rust_bridge/:"
-            echo "$CHANGED" | sed 's/^/    /'
-            echo
-            if confirm_git_write "Commit these binaries on $DEV_HEAD_BRANCH so other users don't need to rebuild?"; then
-                PLATFORM="$(uname -sm)"
-                RS_SHA="$(git -C "$REPO_ROOT/DYNAM-O_rs" rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
-                # Stage only the binaries we just built — not unrelated modifications.
-                (cd "$REPO_ROOT/DYNAM-O" && echo "$CHANGED" | xargs git add --)
-                (cd "$REPO_ROOT/DYNAM-O" && git commit -m "chore: MEX binaries for $PLATFORM (dynamo_rs @ $RS_SHA)
+            PRIVACY_PY="$(command -v python3 || command -v python || true)"
+            PRIVACY_ARTIFACTS=()
+            case "$(uname -sm)" in
+                "Darwin arm64")  PRIVACY_MEX_EXT="mexmaca64"; PRIVACY_LIB="libdynamo_rs.dylib" ;;
+                "Darwin x86_64") PRIVACY_MEX_EXT="mexmaci64"; PRIVACY_LIB="libdynamo_rs.dylib" ;;
+                Linux*)          PRIVACY_MEX_EXT="mexa64";    PRIVACY_LIB="libdynamo_rs.so" ;;
+                MINGW*|MSYS*|CYGWIN*) PRIVACY_MEX_EXT="mexw64"; PRIVACY_LIB="dynamo_rs.dll" ;;
+                *) PRIVACY_MEX_EXT=""; PRIVACY_LIB="" ;;
+            esac
+            for artifact in "$MEX_DIR"/*."$PRIVACY_MEX_EXT" \
+                            "$MEX_DIR/$PRIVACY_LIB" \
+                            "$MEX_DIR"/data_matlab_filters/*.npy; do
+                [ -f "$artifact" ] && PRIVACY_ARTIFACTS+=("$artifact")
+            done
+            PRIVACY_PASSED=true
+            if [ -z "$PRIVACY_MEX_EXT" ]; then
+                warn "This platform is not supported by the privacy gate."
+                PRIVACY_PASSED=false
+            elif [ "${#PRIVACY_ARTIFACTS[@]}" -eq 0 ]; then
+                warn "No current-platform artifacts were found for the privacy gate."
+                PRIVACY_PASSED=false
+            elif [ -z "$PRIVACY_PY" ]; then
+                warn "Python is required to privacy-check binaries before committing."
+                warn "The binaries were built but will not be offered for commit."
+                PRIVACY_PASSED=false
+            elif ! "$PRIVACY_PY" "$REPO_ROOT/scripts/privacy_gate.py" \
+                    --sensitive-path "$REPO_ROOT" \
+                    --sensitive-path "$HOME" \
+                    --sensitive-path "${TMPDIR:-/tmp}" \
+                    --sensitive-path "${CARGO_HOME:-$HOME/.cargo}" \
+                    --sensitive-path "${RUSTUP_HOME:-$HOME/.rustup}" \
+                    "${PRIVACY_ARTIFACTS[@]}"; then
+                warn "The binaries were built but failed the mandatory privacy gate."
+                warn "They will not be offered for commit."
+                PRIVACY_PASSED=false
+            fi
+            if $PRIVACY_PASSED; then
+                echo
+                info "Freshly-built platform binaries under DYNAM-O/rust_bridge/:"
+                echo "$CHANGED" | sed 's/^/    /'
+                echo
+                if confirm_git_write "Commit these binaries on $DEV_HEAD_BRANCH so other users don't need to rebuild?"; then
+                    PLATFORM="$(uname -sm)"
+                    RS_SHA="$(git -C "$REPO_ROOT/DYNAM-O_rs" rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
+                    # Stage only the binaries we just built — not unrelated modifications.
+                    (cd "$REPO_ROOT/DYNAM-O" && echo "$CHANGED" | xargs git add --)
+                    (cd "$REPO_ROOT/DYNAM-O" && git commit -m "chore: MEX binaries for $PLATFORM (dynamo_rs @ $RS_SHA)
 
 Pre-built artifacts committed from a bootstrap.sh run on $PLATFORM so end
 users on the same platform can clone + run without a MATLAB/Rust toolchain.
 
 dynamo_rs source SHA: $RS_SHA")
-                if confirm_git_write "Push to origin/$DEV_HEAD_BRANCH?"; then
-                    if git -C "$REPO_ROOT/DYNAM-O" push origin "$DEV_HEAD_BRANCH"; then
-                        ok "Pushed MEX binaries to origin/$DEV_HEAD_BRANCH."
+                    if confirm_git_write "Push to origin/$DEV_HEAD_BRANCH?"; then
+                        if git -C "$REPO_ROOT/DYNAM-O" push origin "$DEV_HEAD_BRANCH"; then
+                            ok "Pushed MEX binaries to origin/$DEV_HEAD_BRANCH."
+                        else
+                            warn "Push failed (no permission, network, or non-fast-forward)."
+                            warn "The commit is in your local DYNAM-O — push it manually when ready."
+                        fi
                     else
-                        warn "Push failed (no permission, network, or non-fast-forward)."
-                        warn "The commit is in your local DYNAM-O — push it manually when ready."
+                        ok "Committed locally. Push with:  (cd DYNAM-O && git push origin $DEV_HEAD_BRANCH)"
                     fi
-                else
-                    ok "Committed locally. Push with:  (cd DYNAM-O && git push origin $DEV_HEAD_BRANCH)"
                 fi
             fi
         fi
@@ -350,7 +393,7 @@ if [ -n "$PY" ]; then
         # try `python setup.py egg_info` on maturin and fail. Splitting the
         # commands forces the upgrade to land before maturin is installed.
         "$PIP" install --quiet --upgrade "pip>=21" setuptools wheel
-        "$PIP" install --quiet maturin
+        "$PIP" install --quiet "maturin==1.14.1"
         info "Building multitaper_rs Python extension (maturin develop --release)..."
         (
             # maturin refuses when CONDA_PREFIX and VIRTUAL_ENV are both set.
@@ -358,13 +401,15 @@ if [ -n "$PY" ]; then
             cd "$REPO_ROOT/DYNAM-O/toolbox/helper_functions/multitaper_toolbox/rust"
             VIRTUAL_ENV="$VENV" "$PYBIN" -m maturin develop --release
         )
-        info "Building dynamo_rs Python extension (maturin develop --release)..."
+        sanitize_maturin_sboms "$REPO_ROOT" "$PYBIN" "$VENV" multitaper_rs
+        info "Building dynamo_rs Python extension (maturin develop --release --locked)..."
         (
             # maturin refuses when CONDA_PREFIX and VIRTUAL_ENV are both set.
             unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL 2>/dev/null || true
             cd "$REPO_ROOT/DYNAM-O_rs/rust"
-            VIRTUAL_ENV="$VENV" "$PYBIN" -m maturin develop --release --features python
+            VIRTUAL_ENV="$VENV" "$PYBIN" -m maturin develop --release --locked --features python
         )
+        sanitize_maturin_sboms "$REPO_ROOT" "$PYBIN" "$VENV" dynamo_rs
         info "Installing pydynamo itself (pip install -e .)..."
         (cd "$REPO_ROOT/DYNAM-O_py" && "$PIP" install --quiet -e .)
         info "Checking the accelerated Python installation..."

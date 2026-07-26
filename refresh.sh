@@ -28,6 +28,11 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
+# All Rust and Maturin builds inherit privacy-preserving source mappings.
+# shellcheck source=scripts/configure_build_paths.sh
+source "$REPO_ROOT/scripts/configure_build_paths.sh"
+configure_build_paths "$REPO_ROOT"
+
 # ---------- colors + helpers ----------
 if [ -t 1 ]; then
     C_BLUE='\033[1;34m'; C_YLW='\033[1;33m'; C_RED='\033[1;31m'
@@ -209,8 +214,8 @@ if [ -d DYNAM-O_rs/rust ]; then
         warn "cargo not found on PATH; skipping Rust rebuild."
         warn "Install rustup (https://rustup.rs) or run bootstrap.sh first."
     else
-        info "Rebuilding dynamo_rs + standalone CLI (cargo build --release)..."
-        (cd DYNAM-O_rs/rust && cargo build --release)
+        info "Rebuilding dynamo_rs + standalone CLI (cargo build --release --locked)..."
+        (cd DYNAM-O_rs/rust && cargo build --release --locked)
         CLI_BIN="$REPO_ROOT/DYNAM-O_rs/rust/target/release/dynamo"
         ok "Rust artifacts up to date: $CLI_BIN"
     fi
@@ -363,7 +368,7 @@ if [ -n "$VENV" ] && [ ! -d "$VENV" ]; then
         # maturin second. Old pips fail PEP 517 builds otherwise.
         info "Upgrading pip + installing maturin..."
         "$VENV/bin/pip" install --quiet --upgrade "pip>=21" setuptools wheel
-        "$VENV/bin/pip" install --quiet maturin
+        "$VENV/bin/pip" install --quiet "maturin==1.14.1"
     else
         VENV=""
     fi
@@ -373,18 +378,21 @@ if [ -n "$VENV" ] && [ -d "$VENV" ]; then
     PYBIN="$VENV/bin/python"
     PIP="$VENV/bin/pip"
     if confirm "Rebuild pydynamo native extensions (maturin develop --release)?"; then
+        "$PIP" install --quiet "maturin==1.14.1"
         info "Rebuilding multitaper_rs Python extension..."
         (
             unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL 2>/dev/null || true
             cd "$REPO_ROOT/DYNAM-O/toolbox/helper_functions/multitaper_toolbox/rust"
             VIRTUAL_ENV="$VENV" "$PYBIN" -m maturin develop --release
         )
-        info "Rebuilding dynamo_rs Python extension..."
+        sanitize_maturin_sboms "$REPO_ROOT" "$PYBIN" "$VENV" multitaper_rs
+        info "Rebuilding dynamo_rs Python extension (--locked)..."
         (
             unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL 2>/dev/null || true
             cd "$REPO_ROOT/DYNAM-O_rs/rust"
-            VIRTUAL_ENV="$VENV" "$PYBIN" -m maturin develop --release --features python
+            VIRTUAL_ENV="$VENV" "$PYBIN" -m maturin develop --release --locked --features python
         )
+        sanitize_maturin_sboms "$REPO_ROOT" "$PYBIN" "$VENV" dynamo_rs
         info "Re-installing pydynamo (pip install -e .)..."
         (cd "$REPO_ROOT/DYNAM-O_py" && "$PIP" install --quiet -e .)
         info "Checking the accelerated Python installation..."
