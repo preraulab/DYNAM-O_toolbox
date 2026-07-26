@@ -3,11 +3,11 @@ DYNAM-O toolbox bootstrap — Windows (PowerShell)
 
 Clones the three sub-repos, installs Rust if missing, builds the Rust core
 and the standalone `dynamo.exe` CLI, and (optionally) builds the MATLAB
-MEX wrappers and the Python pydynamo extension.
+MEX wrappers and the Python native extensions.
 
 Usage:
     .\bootstrap.ps1              # interactive — prompts for each optional step
-    .\bootstrap.ps1 -Yes         # non-interactive; accept all prompts
+    .\bootstrap.ps1 -Yes         # non-interactive; accept setup prompts
     .\bootstrap.ps1 -RustOnly    # only build the Rust core (skip MATLAB + Python)
 
 Re-run any time — each step checks whether its target already exists.
@@ -35,18 +35,26 @@ function Confirm-Step($prompt) {
     return ($yn -match '^[Yy]')
 }
 
-# ---------- 1. Ensure sub-repos exist AND are on the rust-bridge branch ----------
+function Confirm-GitWrite($prompt) {
+    if ([Console]::IsInputRedirected) {
+        Warn "Skipping Git write in non-interactive mode: $prompt"
+        return $false
+    }
+    $yn = Read-Host "? $prompt [y/N]"
+    return ($yn -match '^[Yy]')
+}
+
+# ---------- 1. Ensure sub-repos exist AND are on the master branch ----------
 #
 # Two ways a user gets here:
-#   (a) Fresh meta-repo clone (no submodules today) -> sub-repo dirs don't
-#       exist yet. We clone each on rust-bridge.
-#   (b) Meta-repo with submodules (Part 3, future) -> 'git clone --recursive'
-#       already populated the sub-repo dirs at whatever SHA the meta-repo
-#       pins. That SHA may not be on rust-bridge. We detect + offer to switch.
-$branch = 'rust-bridge'
+#   (a) Fresh meta-repo clone -> sub-repo dirs do not exist yet. We clone
+#       each on master.
+#   (b) Existing setup -> sub-repo dirs already exist. We verify their
+#       branch and offer to align them when needed.
+$branch = 'master'
 # Inherit the clone protocol from the meta-repo's origin URL. SSH ->
 # SSH sub-repos; HTTPS -> HTTPS sub-repos. Matches the submodule
-# relative-URL pattern in DYNAM-O_dev/.gitmodules so the whole toolbox
+# relative-URL pattern in DYNAM-O/.gitmodules so the whole toolbox
 # uses one auth path. Defaults to SSH when there's no clear protocol
 # (e.g. tarball download) — contributors are the primary audience and
 # SSH skips the PAT prompt on push.
@@ -58,7 +66,7 @@ if ($originUrl -match '^https://github\.com/') {
 }
 $repos = @(
     @{ Dir = 'DYNAM-O_rs';  Repo = 'DYNAM-O_rs' },
-    @{ Dir = 'DYNAM-O_dev';  Repo = 'DYNAM-O_dev' },
+    @{ Dir = 'DYNAM-O';     Repo = 'DYNAM-O' },
     @{ Dir = 'DYNAM-O_py';  Repo = 'DYNAM-O_py' }
 )
 
@@ -146,7 +154,7 @@ if ($matlab) {
     Info "MATLAB detected: $matlabPath"
     $mexBuilt = $false
     if (Confirm-Step "Build MATLAB MEX wrappers (requires an active license)?") {
-        $mexDir = Join-Path $repoRoot 'DYNAM-O_dev\rust_bridge'
+        $mexDir = Join-Path $repoRoot 'DYNAM-O\rust_bridge'
         Info "Invoking MATLAB headless — this may take ~30 s..."
         & $matlabPath -batch "cd('$mexDir'); build_rust_mex"
         if ($LASTEXITCODE -eq 0) {
@@ -161,10 +169,12 @@ if ($matlab) {
 
     # --- Offer to commit + push the freshly-built platform-specific binaries ---
     # Goal: contributors on each platform push their MEX + shared-library
-    # artifacts back to rust-bridge so end users can clone-and-run without
+    # artifacts back to master so end users can clone-and-run without
     # needing MATLAB or a Rust toolchain themselves.
     if ($mexBuilt) {
-        $devRoot = Join-Path $repoRoot 'DYNAM-O_dev'
+        $devRoot = Join-Path $repoRoot 'DYNAM-O'
+        $devBranch = (git -C $devRoot symbolic-ref --short HEAD 2>$null)
+        if (-not $devBranch) { $devBranch = 'HEAD' }
         $status = git -C $devRoot status --porcelain -- rust_bridge
         $pattern = '\.(mexa64|mexmaci64|mexmaca64|mexw64|dylib|so|dll)$'
         $changed = @()
@@ -176,24 +186,22 @@ if ($matlab) {
             Info 'No MEX / shared-lib changes detected under rust_bridge/ — nothing to commit.'
         } else {
             Write-Host ''
-            Info 'Freshly-built platform binaries under DYNAM-O_dev\rust_bridge\:'
+            Info 'Freshly-built platform binaries under DYNAM-O\rust_bridge\:'
             $changed | ForEach-Object { Write-Host "    $_" }
             Write-Host ''
-            if (Confirm-Step "Commit + push these to the current branch so other users don't need to rebuild?") {
+            if (Confirm-GitWrite "Commit these binaries on the current branch so other users don't need to rebuild?") {
                 $platform = "Windows $env:PROCESSOR_ARCHITECTURE"
-                $devBranch = (git -C $devRoot symbolic-ref --short HEAD 2>$null)
-                if (-not $devBranch) { $devBranch = 'HEAD' }
                 $rsSha = (git -C (Join-Path $repoRoot 'DYNAM-O_rs') rev-parse --short HEAD 2>$null)
                 if (-not $rsSha) { $rsSha = 'unknown' }
-                # Branch safety: pre-built binaries should land on rust-bridge,
+                # Branch safety: pre-built binaries should land on master,
                 # not whatever branch the contributor happens to be on.
                 $continueMexPush = $true
-                if ($devBranch -ne 'rust-bridge') {
-                    Warn "DYNAM-O_dev is on branch '$devBranch', not 'rust-bridge'."
-                    Warn "Platform binaries are normally committed to rust-bridge so the"
+                if ($devBranch -ne 'master') {
+                    Warn "DYNAM-O is on branch '$devBranch', not 'master'."
+                    Warn "Platform binaries are normally committed to master so the"
                     Warn "whole team picks them up. Pushing to '$devBranch' may not be what you want."
-                    if (-not (Confirm-Step "Continue and push to '$devBranch' anyway?")) {
-                        Info 'Skipping commit — checkout rust-bridge first if you want to contribute binaries.'
+                    if (-not (Confirm-GitWrite "Continue and commit to '$devBranch' anyway?")) {
+                        Info 'Skipping commit — checkout master first if you want to contribute binaries.'
                         $continueMexPush = $false
                     }
                 }
@@ -209,16 +217,16 @@ toolchain.
 dynamo_rs source SHA: $rsSha
 "@
                     git -C $devRoot commit -m $msg
-                    if (Confirm-Step "Push to origin/$devBranch?") {
+                    if (Confirm-GitWrite "Push to origin/$devBranch?") {
                         git -C $devRoot push origin $devBranch
                         if ($LASTEXITCODE -eq 0) {
                             OK "Pushed MEX binaries to origin/$devBranch."
                         } else {
                             Warn 'Push failed (no permission, network, or non-fast-forward).'
-                            Warn 'The commit is in your local DYNAM-O_dev — push it manually when ready.'
+                            Warn 'The commit is in your local DYNAM-O — push it manually when ready.'
                         }
                     } else {
-                        OK "Committed locally. Push with:  cd DYNAM-O_dev; git push origin $devBranch"
+                        OK "Committed locally. Push with:  cd DYNAM-O; git push origin $devBranch"
                     }
                 }
             }
@@ -226,28 +234,33 @@ dynamo_rs source SHA: $rsSha
 
         # ---- 4b. Optional: run head-to-head benchmark on this machine ----
         # After MEX is landed, capture a backend='rust' vs backend='matlab'
-        # timing + peak-count snapshot. benchmark_runDYNAMO('push','yes')
-        # writes its own JSON under rust_bridge/benchmarks/runs/ and
-        # commits+pushes it for us.
-        if (Confirm-Step "Run benchmark_runDYNAMO on 'night' and push the result JSON?") {
+        # timing + peak-count snapshot under rust_bridge/benchmarks/runs/.
+        if (Confirm-Step "Run benchmark_runDYNAMO on 'night' and write the result JSON?") {
+            $benchmarkPushMode = 'no'
+            if (Confirm-GitWrite "Commit the benchmark JSON on $devBranch after it finishes?") {
+                $benchmarkPushMode = 'commit'
+                if (Confirm-GitWrite "Push that benchmark commit to origin/$devBranch?") {
+                    $benchmarkPushMode = 'yes'
+                }
+            }
             Info 'Running headless MATLAB benchmark — this takes ~3-6 minutes.'
-            $benchCmd = "addpath(genpath('$(Join-Path $repoRoot 'DYNAM-O_dev')')); " +
-                        "cd('$(Join-Path $repoRoot 'DYNAM-O_dev\rust_bridge')'); " +
-                        "benchmark_runDYNAMO('push','yes'); exit"
+            $benchCmd = "addpath(genpath('$(Join-Path $repoRoot 'DYNAM-O')')); " +
+                        "cd('$(Join-Path $repoRoot 'DYNAM-O\rust_bridge')'); " +
+                        "benchmark_runDYNAMO('push','$benchmarkPushMode'); exit"
             & $matlabPath -batch $benchCmd
             if ($LASTEXITCODE -eq 0) {
-                OK 'Benchmark complete. JSON written under DYNAM-O_dev\rust_bridge\benchmarks\runs\.'
+                OK 'Benchmark complete. JSON written under DYNAM-O\rust_bridge\benchmarks\runs\.'
             } else {
                 Warn 'Benchmark run failed — see the output above.'
                 Warn 'You can retry manually with:'
-                Warn "    powershell -File $(Join-Path $repoRoot 'DYNAM-O_dev\rust_bridge\run_benchmark.ps1')"
+                Warn "    powershell -File $(Join-Path $repoRoot 'DYNAM-O\rust_bridge\run_benchmark.ps1')"
             }
         }
     }
 } else {
     Info 'MATLAB not found on PATH.'
     Info 'If / when you install MATLAB, open it and run:'
-    Info "    cd('$(Join-Path $repoRoot 'DYNAM-O_dev\rust_bridge')'); build_rust_mex"
+    Info "    cd('$(Join-Path $repoRoot 'DYNAM-O\rust_bridge')'); build_rust_mex"
 }
 
 # ---------- 5. Optional: Python venv + pydynamo ----------
@@ -256,7 +269,7 @@ if ($null -eq $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
 
 if ($py) {
     Info "Python detected: $(& $py.Source --version)"
-    if (Confirm-Step "Create a venv and install pydynamo (+ Rust extension)?") {
+    if (Confirm-Step "Create a venv and install pydynamo (+ native extensions)?") {
         $venv = Join-Path $repoRoot 'DYNAM-O_py\.venv'
         if (-not (Test-Path $venv)) {
             Info "Creating venv at $venv..."
@@ -268,6 +281,12 @@ if ($py) {
         $pip = Join-Path $venv 'Scripts\pip.exe'
         Info "Installing pip + maturin in the venv..."
         & $pip install --quiet --upgrade pip maturin
+        Info "Building multitaper_rs Python extension (maturin develop --release)..."
+        Push-Location "DYNAM-O\toolbox\helper_functions\multitaper_toolbox\rust"
+        $env:VIRTUAL_ENV = $venv
+        $env:CONDA_PREFIX = ''
+        & $pyBin -m maturin develop --release
+        Pop-Location
         Info "Building dynamo_rs Python extension (maturin develop --release)..."
         Push-Location "DYNAM-O_rs\rust"
         $env:VIRTUAL_ENV = $venv
@@ -277,8 +296,10 @@ if ($py) {
         Info "Installing pydynamo itself (pip install -e .)..."
         Push-Location "DYNAM-O_py"
         & $pip install --quiet -e .
+        Info "Checking the accelerated Python installation..."
+        & $pyBin scripts\check_install.py
         Pop-Location
-        OK "pydynamo installed into $venv."
+        OK "pydynamo and both native extensions installed into $venv."
     }
 } else {
     Info "Python not found on PATH. Skipping Python setup."
@@ -292,7 +313,7 @@ Write-Host ''
 Write-Host 'Next steps — pick one:'
 Write-Host ''
 Write-Host '  MATLAB:'
-Write-Host '    cd DYNAM-O_dev; matlab -r "runDYNAMO(''segment'')"'
+Write-Host '    cd DYNAM-O; matlab -r "runDYNAMO(''segment'')"'
 Write-Host ''
 Write-Host '  Python (pydynamo):'
 Write-Host "    DYNAM-O_py\.venv\Scripts\Activate.ps1"

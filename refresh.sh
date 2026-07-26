@@ -12,14 +12,13 @@
 #
 # Per-sub-repo branch overrides (CLI flag or env var; CLI wins, mirroring
 # bootstrap.sh):
-#   --dev-branch <name>          DYNAM-O_dev branch     (default: rust-bridge)
-#   --rs-branch  <name>          DYNAM-O_rs  branch     (default: rust-bridge)
-#   --py-branch  <name>          DYNAM-O_py  branch     (default: rust-bridge)
+#   --dev-branch <name>          DYNAM-O branch         (default: master)
+#   --rs-branch  <name>          DYNAM-O_rs branch      (default: master)
+#   --py-branch  <name>          DYNAM-O_py branch      (default: master)
 #   DEV_BRANCH=foo ./refresh.sh         same effect via env var
 #
 # If a sub-repo is on a different branch than its target, refresh prompts
-# to switch (matching bootstrap.sh) — needed so users still on the now-
-# merged file-manager-overhaul branch converge to rust-bridge on next run.
+# to switch (matching bootstrap.sh).
 #
 # Each sub-repo that doesn't exist yet is skipped with a warning — run
 # bootstrap.sh first if you haven't.
@@ -43,11 +42,11 @@ err()  { printf "${C_RED}[refresh]${C_RST} %s\n" "$*" >&2; }
 
 AUTO_YES=false
 RUST_ONLY=false
-# Targets default to rust-bridge for all three sub-repos, matching bootstrap.sh.
+# Targets default to master for all three sub-repos, matching bootstrap.sh.
 # Env vars override defaults; CLI flags override env vars.
-DEV_BRANCH="${DEV_BRANCH:-rust-bridge}"
-RS_BRANCH="${RS_BRANCH:-rust-bridge}"
-PY_BRANCH="${PY_BRANCH:-rust-bridge}"
+DEV_BRANCH="${DEV_BRANCH:-master}"
+RS_BRANCH="${RS_BRANCH:-master}"
+PY_BRANCH="${PY_BRANCH:-master}"
 while [ $# -gt 0 ]; do
     case "$1" in
         --yes|-y) AUTO_YES=true ;;
@@ -61,7 +60,7 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-info "Targets: DYNAM-O_dev=$DEV_BRANCH  DYNAM-O_rs=$RS_BRANCH  DYNAM-O_py=$PY_BRANCH"
+info "Targets: DYNAM-O=$DEV_BRANCH  DYNAM-O_rs=$RS_BRANCH  DYNAM-O_py=$PY_BRANCH"
 
 confirm() {
     local prompt="$1"
@@ -74,10 +73,8 @@ confirm() {
 # ---------- 1. Refresh each sub-repo ----------
 #
 # Each sub-repo has a target branch (DEV_BRANCH / RS_BRANCH / PY_BRANCH).
-# If the sub-repo is on something else, refresh offers to switch — needed
-# because file-manager-overhaul was merged into rust-bridge, and existing
-# clones still on file-manager-overhaul would otherwise silently keep
-# refreshing a branch that no longer receives new commits.
+# If the sub-repo is on something else, refresh offers to switch so all
+# repositories stay on their configured targets.
 #
 # We use `--ff-only` deliberately: a merge surprise during a refresh is
 # almost never what the user wants. If a sub-repo has diverging local
@@ -120,8 +117,7 @@ refresh_subrepo() {
 
     # Align to target branch if the sub-repo is on something else (or
     # detached). Without this, refresh would silently keep a stale branch
-    # up-to-date and the user would never converge after the file-manager-
-    # overhaul → rust-bridge transition.
+    # up-to-date instead of converging on the configured target.
     if [ "$current" != "$target" ]; then
         if [ "$current" = "DETACHED" ]; then
             warn "$dir is in detached-HEAD state (expected '$target')."
@@ -200,12 +196,12 @@ refresh_subrepo() {
 # before refresh_subrepo runs since it may pull, branch-switch, or both.
 RS_PRE_HEAD=""
 DEV_PRE_HEAD=""
-[ -d DYNAM-O_rs/.git ]  && RS_PRE_HEAD="$(git -C DYNAM-O_rs rev-parse HEAD 2>/dev/null || echo '')"
-[ -d DYNAM-O_dev/.git ] && DEV_PRE_HEAD="$(git -C DYNAM-O_dev rev-parse HEAD 2>/dev/null || echo '')"
+[ -d DYNAM-O_rs/.git ] && RS_PRE_HEAD="$(git -C DYNAM-O_rs rev-parse HEAD 2>/dev/null || echo '')"
+[ -d DYNAM-O/.git ]    && DEV_PRE_HEAD="$(git -C DYNAM-O rev-parse HEAD 2>/dev/null || echo '')"
 
-refresh_subrepo DYNAM-O_rs  "$RS_BRANCH"
-refresh_subrepo DYNAM-O_dev "$DEV_BRANCH"
-refresh_subrepo DYNAM-O_py  "$PY_BRANCH"
+refresh_subrepo DYNAM-O_rs "$RS_BRANCH"
+refresh_subrepo DYNAM-O    "$DEV_BRANCH"
+refresh_subrepo DYNAM-O_py "$PY_BRANCH"
 
 # ---------- 2. Rebuild Rust core ----------
 if [ -d DYNAM-O_rs/rust ]; then
@@ -242,7 +238,7 @@ case "$(uname -sm)" in
     *)               MEX_EXT="";          DYLIB_NAME="" ;;
 esac
 
-MEX_DIR="$REPO_ROOT/DYNAM-O_dev/rust_bridge"
+MEX_DIR="$REPO_ROOT/DYNAM-O/rust_bridge"
 NEEDS_MEX=false
 MEX_REASONS=()
 
@@ -259,20 +255,20 @@ if [ -d DYNAM-O_rs/rust/src ] && [ -n "$(git -C DYNAM-O_rs status --porcelain --
 fi
 
 # (c) rust_bridge wrappers changed during this refresh
-if [ -n "$DEV_PRE_HEAD" ] && [ "$DEV_PRE_HEAD" != "$(git -C DYNAM-O_dev rev-parse HEAD 2>/dev/null || echo '')" ]; then
-    if git -C DYNAM-O_dev diff --name-only "$DEV_PRE_HEAD" HEAD -- rust_bridge 2>/dev/null \
+if [ -n "$DEV_PRE_HEAD" ] && [ "$DEV_PRE_HEAD" != "$(git -C DYNAM-O rev-parse HEAD 2>/dev/null || echo '')" ]; then
+    if git -C DYNAM-O diff --name-only "$DEV_PRE_HEAD" HEAD -- rust_bridge 2>/dev/null \
        | grep -E '\.(c|h|m)$' >/dev/null; then
         NEEDS_MEX=true
-        MEX_REASONS+=("DYNAM-O_dev/rust_bridge sources changed in pull")
+        MEX_REASONS+=("DYNAM-O/rust_bridge sources changed in pull")
     fi
 fi
 
 # (d) rust_bridge wrappers have uncommitted source changes
 if [ -d "$MEX_DIR" ] && \
-   git -C DYNAM-O_dev status --porcelain -- rust_bridge 2>/dev/null \
+   git -C DYNAM-O status --porcelain -- rust_bridge 2>/dev/null \
    | awk '{print $NF}' | grep -E '\.(c|h|m)$' >/dev/null; then
     NEEDS_MEX=true
-    MEX_REASONS+=("DYNAM-O_dev/rust_bridge has uncommitted source changes")
+    MEX_REASONS+=("DYNAM-O/rust_bridge has uncommitted source changes")
 fi
 
 # (e) no MEX for this platform yet (first run on a new platform)
@@ -290,7 +286,7 @@ fi
 # where the committed wrapper expects a symbol that the committed dylib
 # doesn't export (seen in practice: undefined symbol dynamo_multitaper_spectrogram).
 if [ -n "$DYLIB_NAME" ] && [ -f "$MEX_DIR/$DYLIB_NAME" ]; then
-    LIB_COMMIT_MSG="$(git -C DYNAM-O_dev log -1 --pretty=format:%s -- "rust_bridge/$DYLIB_NAME" 2>/dev/null || echo '')"
+    LIB_COMMIT_MSG="$(git -C DYNAM-O log -1 --pretty=format:%s -- "rust_bridge/$DYLIB_NAME" 2>/dev/null || echo '')"
     LIB_BUILD_SHA="$(printf '%s' "$LIB_COMMIT_MSG" | grep -oE 'dynamo_rs @ [0-9a-f]+' | awk '{print $NF}' || true)"
     CURRENT_RS_SHA="$(git -C DYNAM-O_rs rev-parse HEAD 2>/dev/null || echo '')"
     if [ -n "$LIB_BUILD_SHA" ] && [ -n "$CURRENT_RS_SHA" ]; then
@@ -334,7 +330,7 @@ if $NEEDS_MEX && [ -d "$MEX_DIR" ]; then
     fi
 elif [ -d "$MEX_DIR" ]; then
     info "No MEX-relevant changes detected. Force a rebuild with:"
-    info "    cd DYNAM-O_dev/rust_bridge && matlab -batch build_rust_mex"
+    info "    cd DYNAM-O/rust_bridge && matlab -batch build_rust_mex"
 fi
 
 # ---------- 4. Refresh Python extension if venv exists ----------
@@ -378,7 +374,13 @@ fi
 if [ -n "$VENV" ] && [ -d "$VENV" ]; then
     PYBIN="$VENV/bin/python"
     PIP="$VENV/bin/pip"
-    if confirm "Rebuild pydynamo Python extension (maturin develop --release)?"; then
+    if confirm "Rebuild pydynamo native extensions (maturin develop --release)?"; then
+        info "Rebuilding multitaper_rs Python extension..."
+        (
+            unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL 2>/dev/null || true
+            cd "$REPO_ROOT/DYNAM-O/toolbox/helper_functions/multitaper_toolbox/rust"
+            VIRTUAL_ENV="$VENV" "$PYBIN" -m maturin develop --release
+        )
         info "Rebuilding dynamo_rs Python extension..."
         (
             unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL 2>/dev/null || true
@@ -387,7 +389,9 @@ if [ -n "$VENV" ] && [ -d "$VENV" ]; then
         )
         info "Re-installing pydynamo (pip install -e .)..."
         (cd "$REPO_ROOT/DYNAM-O_py" && "$PIP" install --quiet -e .)
-        ok "pydynamo refreshed in $VENV."
+        info "Checking the accelerated Python installation..."
+        (cd "$REPO_ROOT/DYNAM-O_py" && "$PYBIN" scripts/check_install.py)
+        ok "pydynamo and both native extensions refreshed in $VENV."
     fi
 else
     info "No Python venv at $VENV — skipping pydynamo rebuild."
