@@ -8,12 +8,21 @@ from unittest.mock import call, patch
 from scripts.release_build import (
     MEX_WRAPPERS,
     UNIT_SEPARATOR,
+    cargo_environment,
+    cargo_target_directory,
+    dynamo_rlib_artifacts,
     other_platform_binaries,
     platform_artifacts,
+    require_absent_artifact,
+    release_environment,
     remap_flags,
+    remove_stale_artifact,
+    require_fresh_artifact,
     run,
+    rust_internal_validation_artifacts,
     scan_artifact_bytes,
     submodule_gitlinks,
+    unexpected_current_platform_binaries,
     validate_master,
 )
 
@@ -145,28 +154,157 @@ class ReleaseBuildTests(unittest.TestCase):
             current.write_bytes(b"CURRENT")
             other = mex_dir / "old.mexw64"
             other.write_bytes(b"C:\\Users\\builder\\source")
+            unexpected = mex_dir / "unexpected.mexmaca64"
+            unexpected.write_bytes(b"CURRENT")
 
-            with patch("scripts.release_build.ROOT", root):
+            with patch("scripts.release_build.ROOT", root), patch(
+                "scripts.release_build.sys.platform", "darwin"
+            ), patch("scripts.release_build.platform.machine", return_value="arm64"):
                 byte_scan_only = other_platform_binaries([current])
+                unexpected_current = unexpected_current_platform_binaries([current])
 
             self.assertEqual(byte_scan_only, [other])
+            self.assertEqual(unexpected_current, [unexpected])
             self.assertTrue(scan_artifact_bytes(byte_scan_only, []))
 
-    def test_remap_flags_use_encoded_separator_and_physical_root(self):
+    def test_remap_flags_cover_raw_and_physical_roots(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            flags = remap_flags(root, os.environ)
+            root = Path(directory)
+            physical = root / "physical"
+            physical.mkdir()
+            alias = root / "alias"
+            alias.symlink_to(physical, target_is_directory=True)
+            cargo_home = root / "not-created-cargo-home"
+            environment = {
+                "PWD": str(alias),
+                "CARGO_HOME": str(cargo_home),
+            }
+
+            flags = remap_flags(alias, environment)
             values = flags.split(UNIT_SEPARATOR)
             self.assertIn(
-                f"--remap-path-prefix={root}=/workspace",
+                f"--remap-path-prefix={alias}=/workspace",
                 values,
             )
-            self.assertEqual(
-                values[-2],
-                f"--remap-path-prefix={root}=/workspace",
+            self.assertIn(
+                f"--remap-path-prefix={physical.resolve()}=/workspace",
+                values,
             )
-            self.assertEqual(values[-1], "--remap-path-scope=object")
+            self.assertIn(
+                f"--remap-path-prefix={cargo_home}=/build/cargo",
+                values,
+            )
+            self.assertEqual(values[-1], "--remap-path-scope=all")
             self.assertNotIn(" ", UNIT_SEPARATOR)
+
+    def test_remap_flags_put_more_specific_prefixes_last(self):
+        home = Path("/Users/builder")
+        root = home / "workspace"
+        cargo_home = root / ".cargo"
+        with patch.object(Path, "home", return_value=home):
+            values = remap_flags(
+                root,
+                {"CARGO_HOME": str(cargo_home)},
+            ).split(UNIT_SEPARATOR)
+
+        home_flag = f"--remap-path-prefix={home}=/build/user"
+        root_flag = f"--remap-path-prefix={root}=/workspace"
+        cargo_flag = f"--remap-path-prefix={cargo_home}=/build/cargo"
+        self.assertLess(values.index(home_flag), values.index(root_flag))
+        self.assertLess(values.index(root_flag), values.index(cargo_flag))
+
+    def test_release_environment_rejects_external_cargo_output_controls(self):
+        for variable in ("CARGO_TARGET_DIR", "CARGO_BUILD_TARGET"):
+            with self.subTest(variable=variable), patch.dict(
+                os.environ, {variable: "/redirected"}, clear=True
+            ):
+                with self.assertRaisesRegex(RuntimeError, variable):
+                    release_environment()
+
+    def test_cargo_environment_pins_target_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            crate = Path(directory) / "crate"
+            environment = {"EXAMPLE": "value"}
+
+            controlled = cargo_environment(environment, crate)
+
+            self.assertEqual(
+                controlled["CARGO_TARGET_DIR"],
+                str((crate / "target").resolve()),
+            )
+            self.assertNotIn("CARGO_TARGET_DIR", environment)
+
+    @unittest.skipIf(os.name == "nt", "directory symlinks may require privileges")
+    def test_cargo_target_directory_rejects_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            crate = root / "crate"
+            external = root / "external"
+            crate.mkdir()
+            external.mkdir()
+            (crate / "target").symlink_to(external, target_is_directory=True)
+
+            with self.assertRaisesRegex(RuntimeError, "symlinked Cargo target"):
+                cargo_target_directory(crate)
+
+    def test_stale_artifact_is_removed_and_fresh_output_is_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "dynamo"
+            artifact.write_bytes(b"STALE")
+
+            remove_stale_artifact(artifact)
+
+            self.assertFalse(artifact.exists())
+            with self.assertRaisesRegex(RuntimeError, "configured Cargo build target"):
+                require_fresh_artifact(artifact, "Cargo")
+            artifact.write_bytes(b"FRESH")
+            require_fresh_artifact(artifact, "Cargo")
+
+    def test_forbidden_artifact_must_remain_absent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "libdynamo_rs.a"
+            require_absent_artifact(artifact, "Cargo")
+            artifact.write_bytes(b"ARCHIVE")
+
+            with self.assertRaisesRegex(RuntimeError, "forbidden artifact"):
+                require_absent_artifact(artifact, "Cargo")
+
+    def test_internal_rust_validation_requires_rlib_and_rejects_staticlib(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            deps = root / "DYNAM-O_rs" / "rust" / "target" / "release" / "deps"
+            deps.mkdir(parents=True)
+            rlib = deps / "libdynamo_rs.rlib"
+            rlib.write_bytes(b"RLIB")
+            release = deps.parent
+            import_library = release / "dynamo_rs.dll.lib"
+            import_library.write_bytes(b"IMPORT")
+            pdb = release / "dynamo.pdb"
+            pdb.write_bytes(b"PDB")
+
+            with patch("scripts.release_build.ROOT", root):
+                self.assertEqual(
+                    rust_internal_validation_artifacts(),
+                    sorted((rlib, import_library, pdb)),
+                )
+                (deps / "libdynamo_rs.a").write_bytes(b"ARCHIVE")
+                with self.assertRaisesRegex(RuntimeError, "forbidden artifact"):
+                    rust_internal_validation_artifacts()
+                (deps / "libdynamo_rs.a").unlink()
+                (release / "dynamo_rs.lib").write_bytes(b"MSVC STATICLIB")
+                with self.assertRaisesRegex(RuntimeError, "forbidden artifact"):
+                    rust_internal_validation_artifacts()
+
+    def test_dynamo_rlib_discovery_is_limited_to_first_party_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "target"
+            deps = target / "release" / "deps"
+            deps.mkdir(parents=True)
+            expected = deps / "libdynamo_rs-abc.rlib"
+            expected.write_bytes(b"RLIB")
+            (deps / "libdependency.rlib").write_bytes(b"DEPENDENCY")
+
+            self.assertEqual(dynamo_rlib_artifacts(target), [expected])
 
     def test_discovers_packaged_native_module_and_runtime_filters(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -188,6 +326,9 @@ class ReleaseBuildTests(unittest.TestCase):
             target = root / "DYNAM-O_rs" / "rust" / "target" / "release"
             target.mkdir(parents=True)
             (target / "dynamo").write_bytes(b"CLI")
+            header = root / "DYNAM-O_rs" / "rust" / "include" / "dynamo_rs.h"
+            header.parent.mkdir()
+            header.write_text("/* generated */")
 
             venv = root / "DYNAM-O_py" / ".venv"
             packages = venv / "lib" / "python3.9" / "site-packages"
@@ -218,6 +359,7 @@ class ReleaseBuildTests(unittest.TestCase):
 
             self.assertIn(native_module, artifacts)
             self.assertIn(python_filters / "filter_0.npy", artifacts)
+            self.assertIn(header, artifacts)
             self.assertFalse(any("<expected-" in path.name for path in artifacts))
 
 

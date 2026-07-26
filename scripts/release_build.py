@@ -36,6 +36,16 @@ MEX_WRAPPERS = (
     "so_power_mex",
     "so_phase_mex",
 )
+NATIVE_BINARY_SUFFIXES = {
+    ".dll",
+    ".dylib",
+    ".mexa64",
+    ".mexmaca64",
+    ".mexmaci64",
+    ".mexw64",
+    ".pdb",
+    ".so",
+}
 
 
 def run(
@@ -121,43 +131,144 @@ def validate_master(repo: Path) -> str:
     return head
 
 
+def source_path_variants(value: str) -> list[str]:
+    raw = os.path.expanduser(value).rstrip("/\\")
+    variants = {
+        raw,
+        os.path.abspath(raw).rstrip("/\\"),
+        os.path.realpath(raw).rstrip("/\\"),
+    }
+    variants.update(candidate.replace("\\", "/") for candidate in list(variants))
+    if os.name == "nt":
+        variants.update(candidate.replace("/", "\\") for candidate in list(variants))
+    return sorted(
+        (candidate for candidate in variants if candidate),
+        key=lambda candidate: (len(candidate), candidate),
+    )
+
+
 def remap_flags(root: Path, environ: dict[str, str]) -> str:
-    mappings: list[tuple[Path, str]] = []
+    mappings: list[tuple[str, str]] = []
     for value, destination in (
         (str(Path.home()), "/build/user"),
-        (tempfile.gettempdir(), "/build/tmp"),
+        (tempfile.gettempdir(), "/build/temporary"),
         (environ.get("CARGO_HOME") or str(Path.home() / ".cargo"), "/build/cargo"),
         (environ.get("RUSTUP_HOME") or str(Path.home() / ".rustup"), "/build/rustup"),
-        (str(root), "/workspace"),
     ):
-        source = Path(value).expanduser()
-        if source.exists():
-            mappings.append((source.resolve(), destination))
+        mappings.extend(
+            (variant, destination) for variant in source_path_variants(value)
+        )
+
+    working_directory = environ.get("PWD")
+    if working_directory and os.path.realpath(working_directory) == os.path.realpath(
+        root
+    ):
+        mappings.extend(
+            (variant, "/workspace")
+            for variant in source_path_variants(working_directory)
+        )
+    mappings.extend(
+        (variant, "/workspace")
+        for variant in source_path_variants(str(root))
+    )
+    mappings.sort(key=lambda item: (len(item[0]), item[0]))
 
     flags = []
     seen = set()
     for source, destination in mappings:
-        variants = (str(source),)
-        if os.name == "nt":
-            variants = (str(source), str(source).replace("\\", "/"))
-        for variant in variants:
-            flag = f"--remap-path-prefix={variant}={destination}"
-            if flag not in seen:
-                flags.append(flag)
-                seen.add(flag)
-    flags.append("--remap-path-scope=object")
+        flag = f"--remap-path-prefix={source}={destination}"
+        if flag not in seen:
+            flags.append(flag)
+            seen.add(flag)
+    flags.append("--remap-path-scope=all")
     return UNIT_SEPARATOR.join(flags)
 
 
 def release_environment() -> dict[str, str]:
-    for variable in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"):
+    controlled_variables = (
+        "RUSTFLAGS",
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_TARGET_DIR",
+        "CARGO_BUILD_TARGET",
+    )
+    for variable in controlled_variables:
         if os.environ.get(variable):
             raise RuntimeError(
                 f"{variable} is already set; unset it before a controlled release build"
             )
     env = os.environ.copy()
+    for variable in controlled_variables:
+        env.pop(variable, None)
     env["CARGO_ENCODED_RUSTFLAGS"] = remap_flags(ROOT, env)
     return env
+
+
+def cargo_target_directory(crate: Path) -> Path:
+    crate = crate.resolve()
+    target = crate / "target"
+    for directory in (target, target / "release", target / "release" / "deps"):
+        if directory.is_symlink():
+            raise RuntimeError(
+                f"refusing symlinked Cargo target directory: {directory}"
+            )
+        if directory.exists() and not directory.is_dir():
+            raise RuntimeError(f"Cargo target path is not a directory: {directory}")
+        if not directory.resolve().is_relative_to(crate):
+            raise RuntimeError(f"Cargo target directory escapes its crate: {directory}")
+    return target
+
+
+def cargo_environment(env: dict[str, str], crate: Path) -> dict[str, str]:
+    target = cargo_target_directory(crate)
+    cargo_env = env.copy()
+    cargo_env["CARGO_TARGET_DIR"] = str(target)
+    return cargo_env
+
+
+def remove_stale_artifact(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if not path.is_file() and not path.is_symlink():
+        raise RuntimeError(f"expected artifact path is not a file: {path}")
+    path.unlink()
+
+
+def require_fresh_artifact(path: Path, producer: str) -> None:
+    if not path.is_file():
+        raise RuntimeError(
+            f"{producer} did not create the expected artifact at {path}; "
+            "check for a configured Cargo build target"
+        )
+
+
+def require_absent_artifact(path: Path, producer: str) -> None:
+    if path.exists() or path.is_symlink():
+        raise RuntimeError(f"{producer} unexpectedly created forbidden artifact {path}")
+
+
+def forbidden_static_archives(target: Path) -> tuple[Path, ...]:
+    names = (
+        "libdynamo_rs.a",
+        "dynamo_rs.lib",
+        "libdynamo_rs.lib",
+    )
+    return tuple(
+        directory / name
+        for directory in (target / "release", target / "release" / "deps")
+        for name in names
+    )
+
+
+def dynamo_rlib_artifacts(target: Path) -> list[Path]:
+    return sorted(
+        {
+            path
+            for directory in (target / "release", target / "release" / "deps")
+            for pattern in ("libdynamo_rs*.rlib", "dynamo_rs*.rlib")
+            for path in directory.glob(pattern)
+            if path.is_file()
+        }
+    )
 
 
 def find_matlab() -> Path:
@@ -211,14 +322,27 @@ def sanitize_sboms(python: Path, venv: Path, env: dict[str, str]) -> None:
         return
 
     arguments = [str(python), str(sanitizer)]
-    for source, destination in (
-        (ROOT, "/workspace"),
-        (Path(env.get("CARGO_HOME", Path.home() / ".cargo")), "/build/cargo"),
-        (Path(env.get("RUSTUP_HOME", Path.home() / ".rustup")), "/build/rustup"),
-        (Path(tempfile.gettempdir()), "/build/tmp"),
-        (Path.home(), "/build/user"),
+    mappings = [
+        (str(ROOT), "/workspace"),
+        (env.get("CARGO_HOME") or str(Path.home() / ".cargo"), "/build/cargo"),
+        (env.get("RUSTUP_HOME") or str(Path.home() / ".rustup"), "/build/rustup"),
+        (tempfile.gettempdir(), "/build/temporary"),
+        (str(Path.home()), "/build/user"),
+    ]
+    working_directory = env.get("PWD")
+    if working_directory and os.path.realpath(working_directory) == os.path.realpath(
+        ROOT
     ):
-        arguments.extend(("--map", f"{source.resolve()}={destination}"))
+        mappings.append((working_directory, "/workspace"))
+
+    seen_mappings = set()
+    for source, destination in mappings:
+        for variant in source_path_variants(source):
+            mapping = f"{variant}={destination}"
+            if mapping in seen_mappings:
+                continue
+            seen_mappings.add(mapping)
+            arguments.extend(("--map", mapping))
     targets = tuple(str(path) for path in sbom_directories)
     run((*arguments, *targets), cwd=ROOT / "DYNAM-O_rs" / "rust", env=env)
     run(
@@ -230,7 +354,26 @@ def sanitize_sboms(python: Path, venv: Path, env: dict[str, str]) -> None:
 
 def build_artifacts(env: dict[str, str]) -> tuple[Path, Path]:
     rust = ROOT / "DYNAM-O_rs" / "rust"
-    run(("cargo", "build", "--release", "--locked", "--bin", "dynamo"), cwd=rust, env=env)
+    target = cargo_target_directory(rust)
+    rust_env = cargo_environment(env, rust)
+    cli = target / "release" / (
+        "dynamo.exe" if os.name == "nt" else "dynamo"
+    )
+    remove_stale_artifact(cli)
+    for artifact in dynamo_rlib_artifacts(target):
+        remove_stale_artifact(artifact)
+    for archive in forbidden_static_archives(target):
+        remove_stale_artifact(archive)
+    run(
+        ("cargo", "build", "--release", "--locked", "--bin", "dynamo"),
+        cwd=rust,
+        env=rust_env,
+    )
+    require_fresh_artifact(cli, "Cargo")
+    if not dynamo_rlib_artifacts(target):
+        raise RuntimeError("Cargo did not freshly create the required dynamo_rs rlib")
+    for archive in forbidden_static_archives(target):
+        require_absent_artifact(archive, "Cargo")
 
     mex_dir = ROOT / "DYNAM-O" / "rust_bridge"
     matlab_path = str(mex_dir).replace("'", "''")
@@ -272,9 +415,18 @@ def build_artifacts(env: dict[str, str]) -> tuple[Path, Path]:
         / "helper_functions"
         / "multitaper_toolbox"
         / "rust",
-        env=python_env,
+        env=cargo_environment(
+            python_env,
+            ROOT
+            / "DYNAM-O"
+            / "toolbox"
+            / "helper_functions"
+            / "multitaper_toolbox"
+            / "rust",
+        ),
     )
     sanitize_sboms(python, venv, python_env)
+    rust_python_env = cargo_environment(python_env, rust)
     run(
         (
             str(python),
@@ -287,9 +439,9 @@ def build_artifacts(env: dict[str, str]) -> tuple[Path, Path]:
             "python",
         ),
         cwd=rust,
-        env=python_env,
+        env=rust_python_env,
     )
-    sanitize_sboms(python, venv, python_env)
+    sanitize_sboms(python, venv, rust_python_env)
     run(
         (str(pip), "install", "--quiet", "-e", "."),
         cwd=ROOT / "DYNAM-O_py",
@@ -337,6 +489,7 @@ def platform_artifacts(venv: Path) -> list[Path]:
 
     target = ROOT / "DYNAM-O_rs" / "rust" / "target" / "release"
     artifacts.append(target / cli)
+    artifacts.append(ROOT / "DYNAM-O_rs" / "rust" / "include" / "dynamo_rs.h")
     artifacts.extend(
         path
         for name in ("libdynamo_rs.so", "libdynamo_rs.dylib", "dynamo_rs.dll")
@@ -386,23 +539,69 @@ def platform_artifacts(venv: Path) -> list[Path]:
     return unique
 
 
+def rust_internal_validation_artifacts() -> list[Path]:
+    target = cargo_target_directory(ROOT / "DYNAM-O_rs" / "rust")
+    release = target / "release"
+    rlibs = dynamo_rlib_artifacts(target)
+    if not rlibs:
+        raise RuntimeError("Cargo did not create the required internal dynamo_rs rlib")
+    auxiliaries = {
+        path
+        for directory in (release, release / "deps")
+        for pattern in (
+            "dynamo*.pdb",
+            "dynamo_rs*.dll.lib",
+            "libdynamo_rs*.dll.a",
+        )
+        for path in directory.glob(pattern)
+        if path.is_file()
+    }
+    artifacts = sorted(
+        {
+            *rlibs,
+            *auxiliaries,
+        }
+    )
+    for archive in forbidden_static_archives(target):
+        require_absent_artifact(archive, "Cargo")
+    return artifacts
+
+
 def other_platform_binaries(current_artifacts: Sequence[Path]) -> list[Path]:
     current = set(current_artifacts)
-    suffixes = {
-        ".dll",
-        ".dylib",
-        ".mexa64",
-        ".mexmaca64",
-        ".mexmaci64",
-        ".mexw64",
-        ".pdb",
-        ".so",
-    }
+    current_suffixes = current_platform_binary_suffixes()
     mex_dir = ROOT / "DYNAM-O" / "rust_bridge"
     return sorted(
         path
         for path in mex_dir.iterdir()
-        if path.is_file() and path.suffix.lower() in suffixes and path not in current
+        if path.is_file()
+        and path.suffix.lower() in NATIVE_BINARY_SUFFIXES
+        and path.suffix.lower() not in current_suffixes
+        and path not in current
+    )
+
+
+def current_platform_binary_suffixes() -> set[str]:
+    if sys.platform == "darwin":
+        mex = ".mexmaca64" if platform.machine() == "arm64" else ".mexmaci64"
+        return {mex, ".dylib"}
+    if os.name == "nt":
+        return {".dll", ".mexw64", ".pdb"}
+    return {".mexa64", ".so"}
+
+
+def unexpected_current_platform_binaries(
+    current_artifacts: Sequence[Path],
+) -> list[Path]:
+    current = set(current_artifacts)
+    current_suffixes = current_platform_binary_suffixes()
+    mex_dir = ROOT / "DYNAM-O" / "rust_bridge"
+    return sorted(
+        path
+        for path in mex_dir.iterdir()
+        if path.is_file()
+        and path.suffix.lower() in current_suffixes
+        and path not in current
     )
 
 
@@ -494,6 +693,7 @@ def write_manifest(
     shas: dict[str, str],
     gitlinks: dict[str, dict[str, str]],
     artifacts: Sequence[Path],
+    internal_validation_artifacts: Sequence[Path],
     byte_scan_only_artifacts: Sequence[Path],
     env: dict[str, str],
     venv: Path,
@@ -523,6 +723,9 @@ def write_manifest(
             "matlab": matlab_provenance(matlab, env),
         },
         "artifacts": [str(path.relative_to(ROOT)) for path in artifacts],
+        "internal_path_validation": [
+            str(path.relative_to(ROOT)) for path in internal_validation_artifacts
+        ],
         "cross_platform_byte_scan_only": [
             str(path.relative_to(ROOT)) for path in byte_scan_only_artifacts
         ],
@@ -560,18 +763,33 @@ def main() -> int:
         }
         venv, matlab = build_artifacts(env)
         current_artifacts = platform_artifacts(venv)
+        internal_validation_artifacts = rust_internal_validation_artifacts()
+        unexpected_artifacts = unexpected_current_platform_binaries(
+            current_artifacts
+        )
+        if unexpected_artifacts:
+            rendered = ", ".join(str(path) for path in unexpected_artifacts)
+            raise RuntimeError(
+                "unexpected current-platform native artifacts are outside the "
+                f"release allowlist: {rendered}"
+            )
         byte_scan_only_artifacts = other_platform_binaries(current_artifacts)
         artifacts = list(
             dict.fromkeys((*current_artifacts, *byte_scan_only_artifacts))
         )
         sensitive_paths = {
             str(ROOT),
+            os.getcwd(),
+            os.environ.get("PWD", ""),
             str(Path.home()),
-            str(Path(env.get("CARGO_HOME", Path.home() / ".cargo")).resolve()),
-            str(Path(env.get("RUSTUP_HOME", Path.home() / ".rustup")).resolve()),
-            str(Path(tempfile.gettempdir()).resolve()),
+            env.get("CARGO_HOME") or str(Path.home() / ".cargo"),
+            env.get("RUSTUP_HOME") or str(Path.home() / ".rustup"),
+            tempfile.gettempdir(),
         }
-        findings = scan_artifacts(current_artifacts, sensitive_paths)
+        findings = scan_artifacts(
+            (*current_artifacts, *internal_validation_artifacts),
+            sensitive_paths,
+        )
         findings.extend(
             scan_artifact_bytes(byte_scan_only_artifacts, sensitive_paths)
         )
@@ -585,6 +803,7 @@ def main() -> int:
             shas,
             gitlinks,
             artifacts,
+            internal_validation_artifacts,
             byte_scan_only_artifacts,
             env,
             venv,
