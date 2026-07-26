@@ -105,7 +105,7 @@ Commits and pushes always require explicit confirmation.
 - **Builds** `libdynamo_rs` and the `dynamo` CLI binary.
 - **Detects MATLAB** across macOS (`/Applications/MATLAB*.app`), Linux (`/usr/local/MATLAB/R*`, `/opt/MATLAB/R*`), and Windows (`C:\Program Files\MATLAB\*`), plus the `matlab` command on `PATH`. If found and you consent, runs `matlab -batch build_rust_mex` headless. If headless fails (usually another MATLAB session has the license), prints the copy-paste recipe for your existing MATLAB.
 - **Offers to commit and then push** freshly-built MEX + shared-library artifacts from `DYNAM-O/rust_bridge/`, tagged with platform name and dynamo_rs source SHA. Each Git write requires its own explicit confirmation, including under `--yes`/`-Yes`. See *Share pre-built binaries* below.
-- **Offers to run `benchmark_runDYNAMO`** on the full night fixture (both backends, warmup + timed). It writes a per-run JSON under `DYNAM-O/rust_bridge/benchmarks/runs/` encoding hostname + os + arch + CPU + cores + RAM + MATLAB version + both repo SHAs + per-backend timings + peak counts. Committing and pushing the result are separately confirmed. Takes ~3–6 min; skippable. See *Benchmarking* below.
+- **Leaves benchmarking as an explicit manual step.** Bootstrap does not prompt for or run benchmarks. See *Benchmarking* below when you want to collect timing results.
 - **Detects Python**. If found and you consent, creates a venv at `DYNAM-O_py/.venv`, installs `maturin`, builds both `multitaper_rs` and `dynamo_rs`, installs pydynamo in editable mode, and runs `scripts/check_install.py`.
 
 It's **idempotent** — re-run it after any `git pull` to rebuild, or to add the MATLAB / Python pieces later. Each step short-circuits when its output already exists.
@@ -201,20 +201,9 @@ with `cd DYNAM-O && git push origin master`.
 <details>
 <summary><strong>Benchmarking</strong></summary>
 
-After the MEX step, the bootstrap offers to run
-`benchmark_runDYNAMO('night')` head-to-head on **both** backends —
-pure-MATLAB reference vs Rust MEX — and writes the resulting JSON under
-`DYNAM-O/rust_bridge/benchmarks/runs/`. Committing and pushing that result
-each require explicit confirmation. The file captures:
-
-- Hostname, OS / OS version, architecture, CPU model, cores, RAM
-- MATLAB version, both repo SHAs (+ `dirty` flag if uncommitted)
-- Per-backend per-stage timings (extract pass 1, extract pass 2, refine, histograms, parametric/spline fits, plot) plus a `total`
-- Final peak count per backend
-
-Filenames are `<timestamp>__<host>__<os>-<arch>.json` so multi-machine contributors never git-conflict. `benchmark_summarize` (also in `rust_bridge/`) globs them on read and prints a cross-machine comparison table.
-
-If bootstrap's in-line invocation fails (rare — usually a license issue), you can run the benchmark later from a shell:
+Benchmarking remains available as an explicit manual step after MEX setup.
+The bootstrap scripts do not prompt for or run it. Run the benchmark from a
+shell when you want a head-to-head comparison:
 
 ```bash
 # macOS / Linux
@@ -224,6 +213,16 @@ bash DYNAM-O/rust_bridge/run_benchmark.sh segment rust   # faster sanity check
 # Windows
 powershell -ExecutionPolicy Bypass -File DYNAM-O\rust_bridge\run_benchmark.ps1
 ```
+
+The wrappers write a per-run JSON under
+`DYNAM-O/rust_bridge/benchmarks/runs/`. The file captures:
+
+- Hostname, OS / OS version, architecture, CPU model, cores, RAM
+- MATLAB version, both repo SHAs (+ `dirty` flag if uncommitted)
+- Per-backend per-stage timings (extract pass 1, extract pass 2, refine, histograms, parametric/spline fits, plot) plus a `total`
+- Final peak count per backend
+
+Filenames are `<timestamp>__<host>__<os>-<arch>.json` so multi-machine contributors never git-conflict. `benchmark_summarize` (also in `rust_bridge/`) globs them on read and prints a cross-machine comparison table. The wrappers do not stage, commit, or push the JSON; preserve a result in Git manually if desired.
 
 Both wrappers launch `matlab -nodisplay -batch` so the benchmark runs without loading the MATLAB desktop / Qt / CEF — needed as a workaround for the MATLAB R2025b + macOS 26 CEF font SIGSEGV that takes down long interactive runs. On Linux / Windows the headless invocation is equally safe and avoids consuming a desktop license slot.
 

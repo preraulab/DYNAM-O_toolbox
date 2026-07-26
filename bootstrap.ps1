@@ -232,30 +232,6 @@ dynamo_rs source SHA: $rsSha
             }
         }
 
-        # ---- 4b. Optional: run head-to-head benchmark on this machine ----
-        # After MEX is landed, capture a backend='rust' vs backend='matlab'
-        # timing + peak-count snapshot under rust_bridge/benchmarks/runs/.
-        if (Confirm-Step "Run benchmark_runDYNAMO on 'night' and write the result JSON?") {
-            $benchmarkPushMode = 'no'
-            if (Confirm-GitWrite "Commit the benchmark JSON on $devBranch after it finishes?") {
-                $benchmarkPushMode = 'commit'
-                if (Confirm-GitWrite "Push that benchmark commit to origin/$devBranch?") {
-                    $benchmarkPushMode = 'yes'
-                }
-            }
-            Info 'Running headless MATLAB benchmark — this takes ~3-6 minutes.'
-            $benchCmd = "addpath(genpath('$(Join-Path $repoRoot 'DYNAM-O')')); " +
-                        "cd('$(Join-Path $repoRoot 'DYNAM-O\rust_bridge')'); " +
-                        "benchmark_runDYNAMO('push','$benchmarkPushMode'); exit"
-            & $matlabPath -batch $benchCmd
-            if ($LASTEXITCODE -eq 0) {
-                OK 'Benchmark complete. JSON written under DYNAM-O\rust_bridge\benchmarks\runs\.'
-            } else {
-                Warn 'Benchmark run failed — see the output above.'
-                Warn 'You can retry manually with:'
-                Warn "    powershell -File $(Join-Path $repoRoot 'DYNAM-O\rust_bridge\run_benchmark.ps1')"
-            }
-        }
     }
 } else {
     Info 'MATLAB not found on PATH.'
