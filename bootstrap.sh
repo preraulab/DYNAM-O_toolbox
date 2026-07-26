@@ -235,14 +235,10 @@ else
 fi
 
 # ---------- 3. Build the Rust core + CLI ----------
-info "Building dynamo_rs (cargo build --release)..."
+info "Building dynamo_rs + standalone CLI (cargo build --release)..."
 (cd DYNAM-O_rs/rust && cargo build --release)
-ok "Rust library built."
-
-info "Building standalone dynamo CLI..."
-(cd DYNAM-O_rs/rust && cargo build --release --bin dynamo)
 CLI_BIN="$REPO_ROOT/DYNAM-O_rs/rust/target/release/dynamo"
-ok "CLI built: $CLI_BIN"
+ok "Rust library + CLI built: $CLI_BIN"
 
 if $RUST_ONLY; then
     info "--rust-only set; skipping MATLAB + Python steps."

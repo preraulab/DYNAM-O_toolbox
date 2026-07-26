@@ -122,18 +122,13 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
 }
 
 # ---------- 3. Build the Rust core + CLI ----------
-Info "Building dynamo_rs (cargo build --release)..."
+Info "Building dynamo_rs + standalone CLI (cargo build --release)..."
 Push-Location "DYNAM-O_rs\rust"
 cargo build --release
 if ($LASTEXITCODE -ne 0) { Err "cargo build failed"; Pop-Location; exit $LASTEXITCODE }
-OK "Rust library built."
-
-Info "Building standalone dynamo.exe CLI..."
-cargo build --release --bin dynamo
-if ($LASTEXITCODE -ne 0) { Err "cargo build --bin dynamo failed"; Pop-Location; exit $LASTEXITCODE }
 Pop-Location
 $cliBin = Join-Path $repoRoot 'DYNAM-O_rs\rust\target\release\dynamo.exe'
-OK "CLI built: $cliBin"
+OK "Rust library + CLI built: $cliBin"
 
 if ($RustOnly) {
     Info "-RustOnly set; skipping MATLAB + Python steps."

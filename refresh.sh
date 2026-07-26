@@ -209,10 +209,8 @@ if [ -d DYNAM-O_rs/rust ]; then
         warn "cargo not found on PATH; skipping Rust rebuild."
         warn "Install rustup (https://rustup.rs) or run bootstrap.sh first."
     else
-        info "Rebuilding dynamo_rs (cargo build --release)..."
+        info "Rebuilding dynamo_rs + standalone CLI (cargo build --release)..."
         (cd DYNAM-O_rs/rust && cargo build --release)
-        info "Rebuilding standalone dynamo CLI..."
-        (cd DYNAM-O_rs/rust && cargo build --release --bin dynamo)
         CLI_BIN="$REPO_ROOT/DYNAM-O_rs/rust/target/release/dynamo"
         ok "Rust artifacts up to date: $CLI_BIN"
     fi
