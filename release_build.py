@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build release artifacts from the current origin/master tips."""
+"""Build release artifacts from bootstrap-synchronized master checkouts."""
 
 from __future__ import annotations
 
@@ -14,11 +14,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Sequence
 
-from scripts.privacy_gate import scan_artifacts
+from scripts.privacy_gate import scan_artifacts, scan_bytes, sensitive_needles
 
 
 ROOT = Path(__file__).resolve().parent
 REPOSITORIES = ("DYNAM-O_rs", "DYNAM-O", "DYNAM-O_py")
+CANONICAL_REPOSITORY_URLS = {
+    name: f"https://github.com/preraulab/{name}.git" for name in REPOSITORIES
+}
 MATURIN_VERSION = "1.14.1"
 UNIT_SEPARATOR = "\x1f"
 MEX_WRAPPERS = (
@@ -51,7 +54,7 @@ def run(
         text=True,
         stdout=subprocess.PIPE if capture else None,
     )
-    return result.stdout.strip() if capture else ""
+    return result.stdout.rstrip("\r\n") if capture else ""
 
 
 def git(repo: Path, *arguments: str, capture: bool = False) -> str:
@@ -64,17 +67,47 @@ def require_clean(repo: Path) -> None:
         raise RuntimeError(f"{repo.name} has uncommitted or untracked files")
 
 
-def update_master(repo: Path) -> str:
+def validate_origin(repo: Path) -> None:
+    origin = git(repo, "remote", "get-url", "origin", capture=True)
+    name = repo.name
+    allowed = {
+        CANONICAL_REPOSITORY_URLS[name],
+        CANONICAL_REPOSITORY_URLS[name].removesuffix(".git"),
+        f"git@github.com:preraulab/{name}",
+        f"git@github.com:preraulab/{name}.git",
+        f"ssh://git@github.com/preraulab/{name}",
+        f"ssh://git@github.com/preraulab/{name}.git",
+    }
+    if origin not in allowed:
+        raise RuntimeError(
+            f"{name} origin is not the expected preraulab/{name} repository: "
+            f"{origin}"
+        )
+
+
+def validate_master(repo: Path) -> str:
+    validate_origin(repo)
     require_clean(repo)
-    git(repo, "fetch", "origin", "master", "--prune")
-    git(repo, "switch", "master")
-    git(repo, "merge", "--ff-only", "origin/master")
+    branch = git(repo, "symbolic-ref", "--short", "HEAD", capture=True)
+    if branch != "master":
+        raise RuntimeError(
+            f"{repo.name} is on {branch!r}, not master; run bootstrap first"
+        )
     head = git(repo, "rev-parse", "HEAD", capture=True)
-    remote = git(repo, "rev-parse", "origin/master", capture=True)
+    remote_output = git(
+        repo,
+        "ls-remote",
+        "--exit-code",
+        "origin",
+        "refs/heads/master",
+        capture=True,
+    )
+    remote = remote_output.split(None, 1)[0]
     if head != remote:
-        raise RuntimeError(f"{repo.name}/master is not exactly at origin/master")
-    git(repo, "submodule", "sync", "--recursive")
-    git(repo, "submodule", "update", "--init", "--recursive", "--checkout")
+        raise RuntimeError(
+            f"{repo.name}/master is not exactly at the current origin/master; "
+            "run bootstrap first"
+        )
     submodule_status = git(repo, "submodule", "status", "--recursive", capture=True)
     mismatches = [
         line for line in submodule_status.splitlines() if not line.startswith(" ")
@@ -353,6 +386,41 @@ def platform_artifacts(venv: Path) -> list[Path]:
     return unique
 
 
+def other_platform_binaries(current_artifacts: Sequence[Path]) -> list[Path]:
+    current = set(current_artifacts)
+    suffixes = {
+        ".dll",
+        ".dylib",
+        ".mexa64",
+        ".mexmaca64",
+        ".mexmaci64",
+        ".mexw64",
+        ".pdb",
+        ".so",
+    }
+    mex_dir = ROOT / "DYNAM-O" / "rust_bridge"
+    return sorted(
+        path
+        for path in mex_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in suffixes and path not in current
+    )
+
+
+def scan_artifact_bytes(
+    artifacts: Sequence[Path], sensitive_paths: Iterable[str]
+) -> list[str]:
+    needles = sensitive_needles(sensitive_paths)
+    findings = []
+    for artifact in artifacts:
+        try:
+            data = artifact.read_bytes()
+        except OSError as exc:
+            findings.append(f"{artifact}: could not read artifact: {exc}")
+            continue
+        findings.extend(scan_bytes(data, str(artifact), needles))
+    return findings
+
+
 def version(
     command: Sequence[str], env: dict[str, str], *, cwd: Path = ROOT
 ) -> str:
@@ -426,6 +494,7 @@ def write_manifest(
     shas: dict[str, str],
     gitlinks: dict[str, dict[str, str]],
     artifacts: Sequence[Path],
+    byte_scan_only_artifacts: Sequence[Path],
     env: dict[str, str],
     venv: Path,
     matlab: Path,
@@ -438,6 +507,7 @@ def write_manifest(
             "sha": toolbox_sha,
         },
         "repositories": shas,
+        "repository_origins": CANONICAL_REPOSITORY_URLS,
         "submodule_gitlinks": gitlinks,
         "target": {
             "os": sys.platform,
@@ -453,6 +523,9 @@ def write_manifest(
             "matlab": matlab_provenance(matlab, env),
         },
         "artifacts": [str(path.relative_to(ROOT)) for path in artifacts],
+        "cross_platform_byte_scan_only": [
+            str(path.relative_to(ROOT)) for path in byte_scan_only_artifacts
+        ],
     }
     path = ROOT / "release-build-manifest.json"
     path.write_text(
@@ -466,8 +539,8 @@ def main() -> int:
         if sys.argv[1:] == ["--help"]:
             print(
                 "usage: release_build.py\n\n"
-                "Build and privacy-check artifacts from the three current "
-                "origin/master tips."
+                "Build and privacy-check artifacts from the three "
+                "bootstrap-synchronized master checkouts."
             )
             return 0
         print("usage: release_build.py", file=sys.stderr)
@@ -481,12 +554,16 @@ def main() -> int:
                 f"missing repositories: {', '.join(missing)}; run bootstrap first"
             )
         env = release_environment()
-        shas = {name: update_master(ROOT / name) for name in REPOSITORIES}
+        shas = {name: validate_master(ROOT / name) for name in REPOSITORIES}
         gitlinks = {
             name: submodule_gitlinks(ROOT / name) for name in REPOSITORIES
         }
         venv, matlab = build_artifacts(env)
-        artifacts = platform_artifacts(venv)
+        current_artifacts = platform_artifacts(venv)
+        byte_scan_only_artifacts = other_platform_binaries(current_artifacts)
+        artifacts = list(
+            dict.fromkeys((*current_artifacts, *byte_scan_only_artifacts))
+        )
         sensitive_paths = {
             str(ROOT),
             str(Path.home()),
@@ -494,14 +571,24 @@ def main() -> int:
             str(Path(env.get("RUSTUP_HOME", Path.home() / ".rustup")).resolve()),
             str(Path(tempfile.gettempdir()).resolve()),
         }
-        findings = scan_artifacts(artifacts, sensitive_paths)
+        findings = scan_artifacts(current_artifacts, sensitive_paths)
+        findings.extend(
+            scan_artifact_bytes(byte_scan_only_artifacts, sensitive_paths)
+        )
         if findings:
             print("[release] Privacy gate failed:", file=sys.stderr)
             for finding in findings:
                 print(f"  - {finding}", file=sys.stderr)
             return 1
         manifest = write_manifest(
-            toolbox_sha, shas, gitlinks, artifacts, env, venv, matlab
+            toolbox_sha,
+            shas,
+            gitlinks,
+            artifacts,
+            byte_scan_only_artifacts,
+            env,
+            venv,
+            matlab,
         )
         manifest_findings = scan_artifacts([manifest], sensitive_paths)
         if manifest_findings:

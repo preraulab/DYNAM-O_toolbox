@@ -24,18 +24,18 @@ each — and each can optionally use the `dynamo_rs` Rust core for speed.
 
 ## ⚡ One-command bootstrap (recommended)
 
-On a fresh machine, copy and run exactly one of the blocks below. Each
-handles everything end-to-end — clones the `master` branch of all three
-sub-repos, installs Rust via rustup if missing, builds the
-Rust core + the standalone `dynamo` CLI, and (interactively) offers to
-build the MATLAB MEX wrappers and set up the accelerated Python environment.
+The bootstrap is the single public entrypoint for both first-time setup and
+updates. On every run it clones any missing implementation repositories, or
+fetches and fast-forwards existing clean checkouts to the moving
+`origin/master` heads of `DYNAM-O`, `DYNAM-O_rs`, and `DYNAM-O_py`. It then
+initializes each repository's submodules at the exact gitlinks recorded by
+that selected `master` commit.
 
 ### macOS / Linux / WSL / Git-Bash
 
-Requires only `git` and `curl` on PATH (`rustup` auto-installs on consent).
-**SSH is the default** — works best for lab contributors who will
-commit+push MEX or benchmark artifacts back. The bootstrap inherits
-whichever protocol you used to clone this meta-repo, so HTTPS works too.
+The default pre-built-artifact path requires only `git`. **SSH is the
+contributor default**, while HTTPS works for read-only public clones. The
+bootstrap inherits whichever protocol you used to clone this meta-repo.
 
 ```bash
 # SSH (default — needs a GitHub SSH key configured once)
@@ -47,10 +47,6 @@ git clone https://github.com/preraulab/DYNAM-O_toolbox.git
 cd DYNAM-O_toolbox
 ./bootstrap.sh
 ```
-
-Flags: `--yes` to accept non-Git setup prompts non-interactively,
-`--rust-only` to skip MATLAB + Python. Commits and pushes always require
-explicit confirmation.
 
 ### Windows (PowerShell)
 
@@ -70,34 +66,50 @@ cd DYNAM-O_toolbox
 powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
 ```
 
-Flags: `-Yes` to accept non-Git setup prompts non-interactively,
-`-RustOnly` to skip MATLAB + Python,
-e.g. `powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Yes`.
-Commits and pushes always require explicit confirmation.
+After synchronizing the repositories, bootstrap asks one question:
 
-## Controlled release build
-
-Use the top-level release builder for binaries that may be committed or
-published:
-
-```bash
-python3 release_build.py       # macOS / Linux
-py -3 .\release_build.py       # Windows
+```text
+? Rebuild all native release artifacts and run the privacy gate? [y/N]
 ```
 
-This is intentionally stricter than the interactive bootstrap. It requires
-clean checkouts, fetches and fast-forwards `DYNAM-O`, `DYNAM-O_rs`, and
-`DYNAM-O_py` to the current `origin/master` tips, then records the three
-resolved SHAs plus the unchanged toolbox orchestrator SHA in
-`release-build-manifest.json`. It applies canonical Rust
-source-path remapping to the Cargo, MATLAB MEX, and Maturin builds, uses the
-tracked Cargo lockfile, pins Maturin, sanitizes generated SBOMs, and rejects
-artifacts containing build-machine paths.
+- **No (the default)** uses the checked-in MEX files, shared libraries, and
+  other native artifacts. Bootstrap does not require or invoke MATLAB,
+  Python, Rust, or a C compiler on this path. Checked-in platform coverage
+  can vary, so a particular OS/architecture may need a controlled rebuild
+  or may use the corresponding pure MATLAB/Python fallback.
+- **Yes** enters the controlled build path. Bootstrap internally invokes
+  `release_build.sh` on macOS/Linux or `release_build.ps1` on Windows; that
+  launcher locates Python 3.9 or newer and passes control to the common
+  `release_build.py` implementation.
 
-The build fails if MATLAB, the SBOM sanitizer, an expected platform artifact,
-or any privacy check is missing. It never stages, commits, or pushes. Review
-the resulting changes in `DYNAM-O/rust_bridge/` before committing the
-pre-built files.
+Rerun the same bootstrap command whenever the moving `master` heads change.
+It is both the install and update path. For an unattended controlled build,
+`./bootstrap.sh --yes` or `.\bootstrap.ps1 -Yes` answers Yes to the rebuild
+question; without that option, redirected/non-interactive input safely
+defaults to No.
+
+## Controlled rebuild and privacy gate
+
+The optional **Yes** path is the only supported way to produce native
+artifacts that may be committed or published. It records the three resolved
+child SHAs and the unchanged toolbox orchestrator SHA in
+`release-build-manifest.json`, while still building from the current moving
+`master` heads rather than treating those SHAs as pinned inputs.
+
+The builder applies canonical Rust source-path remapping to the Cargo, MATLAB
+MEX, and Maturin builds, uses the tracked Cargo lockfile and pinned Rust
+toolchain/Maturin version, sanitizes generated SBOMs, and rejects artifacts
+containing build-machine paths. It structurally inspects the current
+platform's native files and byte-scans every other platform binary already in
+`DYNAM-O/rust_bridge/`, so an older checked-in artifact cannot bypass the
+gate. It also verifies the expected current-platform artifacts and
+installation-relative runtime data layout. A missing compiler, MATLAB
+installation, SBOM sanitizer, expected artifact, or privacy check makes the
+controlled rebuild fail.
+
+Bootstrap and the controlled builder never stage, commit, or push. Review the
+resulting changes in `DYNAM-O/rust_bridge/` before committing the pre-built
+files through the normal repository workflow.
 
 `release-build-manifest.json` is an ignored audit output, not a source file.
 Archive it with the corresponding release record rather than committing it to
@@ -109,8 +121,8 @@ later would require explicit archive/DWARF stripping followed by the same
 privacy scan.
 
 The MATLAB implementation of the MEX build remains
-`DYNAM-O/rust_bridge/build_rust_mex.m`; the toolbox release builder is the
-single top-level coordinator that invokes it with the controlled environment.
+`DYNAM-O/rust_bridge/build_rust_mex.m`; the toolbox controlled builder is the
+single top-level coordinator that invokes it with the remapped environment.
 
 <details>
 <summary><strong>SSH vs HTTPS</strong></summary>
@@ -137,26 +149,31 @@ single top-level coordinator that invokes it with the controlled environment.
 <details>
 <summary><strong>What the script does</strong></summary>
 
-- **Clones** any missing sub-repo (`DYNAM-O`, `DYNAM-O_rs`, `DYNAM-O_py`) on `master`, *with submodules* — each `git clone --recursive -b master …` + a defensive `git submodule update --init --recursive` pass so the nested helpers (CSSuicontrols, multitaper_spectrogram, nanstats, erpplot, dynamo_helpers, etc.) land correctly even on flaky networks. Existing clones can be aligned to their configured target branches; the Bash scripts retain per-repository branch overrides for contributor testing.
-- **Installs Rust** via rustup (prompts once for consent).
-- **Builds** `libdynamo_rs` and the `dynamo` CLI binary.
-- **Detects MATLAB** across macOS (`/Applications/MATLAB*.app`), Linux (`/usr/local/MATLAB/R*`, `/opt/MATLAB/R*`), and Windows (`C:\Program Files\MATLAB\*`), plus the `matlab` command on `PATH`. If found and you consent, runs `matlab -batch build_rust_mex` headless. If headless fails (usually another MATLAB session has the license), prints the copy-paste recipe for your existing MATLAB.
-- **Offers to commit and then push** freshly-built MEX + shared-library artifacts from `DYNAM-O/rust_bridge/`, tagged with platform name and dynamo_rs source SHA. Each Git write requires its own explicit confirmation, including under `--yes`/`-Yes`. See *Share pre-built binaries* below.
+- **Clones or fast-forwards** `DYNAM-O`, `DYNAM-O_rs`, and `DYNAM-O_py` to their current `origin/master` heads. It refuses to rewrite a dirty or diverged checkout.
+- **Synchronizes submodules** recursively to the exact gitlinks recorded by those parent commits; submodules do not float independently to their own branch heads.
+- **Prompts once**, defaulting to use the checked-in native artifacts without requiring a compiler.
+- **Runs the controlled rebuild only on Yes**, through the platform launcher and common Python implementation described above.
+- **Leaves all Git writes to the contributor.** Neither path stages, commits, or pushes.
 - **Leaves benchmarking as an explicit manual step.** Bootstrap does not prompt for or run benchmarks. See *Benchmarking* below when you want to collect timing results.
-- **Detects Python**. If found and you consent, creates a venv at `DYNAM-O_py/.venv`, installs `maturin`, builds both `multitaper_rs` and `dynamo_rs`, installs pydynamo in editable mode, and runs `scripts/check_install.py`.
 
-It's **idempotent** — re-run it after any `git pull` to rebuild, or to add the MATLAB / Python pieces later. Each step short-circuits when its output already exists.
+It's **idempotent**: rerun bootstrap to pick up later `master` changes, restore
+the recorded submodule gitlinks, or choose a controlled rebuild on a configured
+build machine.
 
-If anything fails, skip to the manual per-language sections below.
+If synchronization fails, preserve any local work, resolve the reported Git
+problem, and rerun bootstrap. If the controlled build or privacy gate fails,
+fix that failure and rerun it; the manual commands below are only for local
+development and must not be used to produce distributable artifacts.
 
 </details>
 
 <details>
-<summary><strong>Manual equivalent (if you'd rather not run the script)</strong></summary>
+<summary><strong>Manual local-development setup</strong></summary>
 
-The bootstrap is a convenience wrapper — everything it does can be run by
-hand for local development. Use `release_build.py`, not these manual commands,
-for artifacts that will be distributed:
+The commands below are useful for local development, but they are not the
+controlled public-artifact path and may embed local build paths. Do not commit
+their native outputs. To produce artifacts for distribution, rerun bootstrap
+and answer **Yes** to its single rebuild question.
 
 ```bash
 # 1. Clone each sub-repo WITH submodules on master.
@@ -216,24 +233,15 @@ git submodule update --init --recursive
 
 The MATLAB `'rust'` backend needs a MEX binary for *each* platform it runs on (`.mexmaca64` for Apple Silicon, `.mexmaci64` for Intel Mac, `.mexa64` for Linux, `.mexw64` for Windows). Each MEX also needs `libdynamo_rs.{dylib,so,dll}` and `data_matlab_filters/` sitting next to it — `build_rust_mex` copies the runtime files into `rust_bridge/` and embeds a loader-relative rpath, so the bundle is fully relocatable once committed.
 
-Strategy: **each platform-owner runs the bootstrap once, consents to commit + push their binaries, and then anyone on that same platform can clone-and-run with no MATLAB/Rust toolchain.**
+Strategy: **a platform owner reruns bootstrap and answers Yes to its one
+rebuild question; after the privacy gate passes, the owner reviews and
+publishes the platform artifacts through the normal Git workflow.** Bootstrap
+does not stage, commit, or push them.
 
-When the bootstrap finishes building MEX, it diffs `DYNAM-O/rust_bridge/`
-against HEAD, shows you the new `.mex*` + shared-library files, and asks
-separately whether to commit and push:
-```
-? Commit these binaries on master so other users don't need to rebuild? [y/N]
-? Push to origin/master? [y/N]
-```
-
-Consent stages *only* those files (not unrelated edits), commits with a
-message like `chore: MEX binaries for Darwin arm64 (dynamo_rs @ 759e5f9)`,
-and optionally pushes to `origin/master`. Git-write prompts are never
-auto-accepted by `--yes` or `-Yes`.
-
-**Decline** if you're on a throwaway branch, lack push permission, or need
-to inspect the diff first. You can always push an approved local commit later
-with `cd DYNAM-O && git push origin master`.
+Users on a covered platform answer No and consume those checked-in files
+without a compiler. Artifact availability can differ across operating systems
+and CPU architectures, so absence of a matching bundle is not treated as a
+promise that every platform is pre-built.
 
 </details>
 
@@ -314,15 +322,21 @@ git config --global http.sslCAInfo /etc/pki/tls/certs/ca-bundle.crt
 git remote set-url origin git@github.com:preraulab/DYNAM-O.git
 ```
 
-Symptom: bootstrap's MEX-push or benchmark-push steps print "push failed — commit is local." The commit is safe locally; push manually once git can talk to GitHub.
+Symptom: a later manual Git push fails even though the commit is safe locally.
+Push again once Git can talk to GitHub.
 
-**Python 3.6 can't build maturin.** RHEL 8 ships Python 3.6.8 by default; maturin (required to build the pydynamo Rust wheel) needs Python ≥ 3.7. Either install a newer interpreter:
+**The controlled rebuild requires Python 3.9 or newer.** RHEL 8 ships
+Python 3.6.8 by default, which cannot run the common coordinator or current
+Maturin used to build the native Python extensions. Install a newer
+interpreter:
 
 ```bash
 sudo dnf install python39         # or python311
 ```
 
-…and rerun the bootstrap with it on PATH, or just decline the Python step at bootstrap's confirm prompt (the MATLAB and standalone-Rust-CLI paths don't need Python).
+…and rerun bootstrap with it on PATH if you need a controlled rebuild. If
+matching artifacts are already checked in, answer No to the single rebuild
+question instead; the default path does not compile them.
 
 **macOS 26 + MATLAB R2025b interactive runs.** A recurrent Qt/CEF font-rendering SIGSEGV can crash long interactive `runDYNAMO('night', 'backend', 'matlab')` runs. The `matlab` backend path no longer uses `waitbar` (removed 2026-04-24); run via `benchmark_runDYNAMO` or `bash run_benchmark.sh` (both use `matlab -batch`) for any long measurement — `-batch` mode never loads the desktop / Qt / CEF, so the crash path literally isn't in the process.
 
@@ -351,7 +365,10 @@ Are you integrating Rust into your own pipeline?           →  DYNAM-O_rs (libr
 
 ## Separate installations
 
-If you only want one of the three pieces (e.g. just MATLAB, or just Python), the per-package recipes below do exactly what `bootstrap.sh` would do for that one — clone the sub-repo, install its toolchain, build.
+If you only want one of the three pieces (for example, just MATLAB or just
+Python), the per-package recipes below are available for local development.
+They are not the path for producing checked-in public artifacts; use the
+top-level bootstrap and answer Yes for that.
 
 <details>
 <summary><strong> MATLAB (<code>DYNAM-O</code>)</strong></summary>
@@ -756,8 +773,9 @@ orchestration files:
 ```
 DYNAM-O_toolbox/
 ├── README.md              ← you are here
-├── bootstrap.sh / .ps1
-├── refresh.sh
+├── bootstrap.sh / .ps1    (public install/update entrypoints)
+├── release_build.sh / .ps1 (internal platform dispatchers)
+├── release_build.py        (common controlled builder)
 ├── DYNAM-O/                (MATLAB toolbox, GUI, File Manager)
 ├── DYNAM-O_rs/             (pure-Rust kernel)
 └── DYNAM-O_py/             (Python port / pydynamo)
