@@ -1,7 +1,9 @@
+import io
 import os
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import call, patch
 
@@ -13,6 +15,7 @@ from scripts.release_build import (
     dynamo_rlib_artifacts,
     other_platform_binaries,
     platform_artifacts,
+    print_success_summary,
     require_absent_artifact,
     release_environment,
     remap_flags,
@@ -28,6 +31,49 @@ from scripts.release_build import (
 
 
 class ReleaseBuildTests(unittest.TestCase):
+    def test_success_summary_restores_usage_guidance(self):
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            print_success_summary()
+
+        rendered = output.getvalue()
+        self.assertIn("[bootstrap] Bootstrap complete.", rendered)
+        self.assertIn("Next steps — pick one:", rendered)
+        self.assertIn("runDYNAMO('segment')", rendered)
+        self.assertIn(
+            "python -c 'import pydynamo; print(pydynamo.__version__)'",
+            rendered,
+        )
+        if os.name == "nt":
+            self.assertIn(
+                r"DYNAM-O_py\.venv\Scripts\Activate.ps1",
+                rendered,
+            )
+            cli = (
+                Path(__file__).resolve().parent.parent
+                / "DYNAM-O_rs"
+                / "rust"
+                / "target"
+                / "release"
+                / "dynamo.exe"
+            )
+            self.assertIn(f'& "{cli}" --help', rendered)
+        else:
+            self.assertIn(
+                "source DYNAM-O_py/.venv/bin/activate",
+                rendered,
+            )
+            cli = (
+                Path(__file__).resolve().parent.parent
+                / "DYNAM-O_rs"
+                / "rust"
+                / "target"
+                / "release"
+                / "dynamo"
+            )
+            self.assertIn(f"{cli} --help", rendered)
+
     @patch("scripts.release_build.subprocess.run")
     def test_run_preserves_leading_submodule_status_marker(self, subprocess_run):
         subprocess_run.return_value = subprocess.CompletedProcess(
@@ -314,14 +360,11 @@ class ReleaseBuildTests(unittest.TestCase):
             for wrapper in MEX_WRAPPERS:
                 (mex_dir / f"{wrapper}.mexa64").write_bytes(b"\x7fELF")
             (mex_dir / "libdynamo_rs.so").write_bytes(b"ELF")
-            matlab_filters = mex_dir / "data_matlab_filters"
-            matlab_filters.mkdir()
             source_filters = root / "DYNAM-O_rs" / "data_matlab_filters"
             source_filters.mkdir(parents=True)
             for index in range(42):
                 name = f"filter_{index}.npy"
                 (source_filters / name).write_bytes(b"NUMPY")
-                (matlab_filters / name).write_bytes(b"NUMPY")
 
             target = root / "DYNAM-O_rs" / "rust" / "target" / "release"
             target.mkdir(parents=True)
@@ -360,6 +403,7 @@ class ReleaseBuildTests(unittest.TestCase):
             self.assertIn(native_module, artifacts)
             self.assertIn(python_filters / "filter_0.npy", artifacts)
             self.assertIn(header, artifacts)
+            self.assertFalse((mex_dir / "data_matlab_filters").exists())
             self.assertFalse(any("<expected-" in path.name for path in artifacts))
 
 
