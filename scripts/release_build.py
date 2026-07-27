@@ -359,17 +359,33 @@ def build_artifacts(env: dict[str, str]) -> tuple[Path, Path]:
     cli = target / "release" / (
         "dynamo.exe" if os.name == "nt" else "dynamo"
     )
+    if os.name == "nt":
+        shared_library = target / "release" / "dynamo_rs.dll"
+    elif sys.platform == "darwin":
+        shared_library = target / "release" / "libdynamo_rs.dylib"
+    else:
+        shared_library = target / "release" / "libdynamo_rs.so"
     remove_stale_artifact(cli)
+    remove_stale_artifact(shared_library)
     for artifact in dynamo_rlib_artifacts(target):
         remove_stale_artifact(artifact)
     for archive in forbidden_static_archives(target):
         remove_stale_artifact(archive)
     run(
-        ("cargo", "build", "--release", "--locked", "--bin", "dynamo"),
+        (
+            "cargo",
+            "build",
+            "--release",
+            "--locked",
+            "--bin",
+            "dynamo",
+            "--lib",
+        ),
         cwd=rust,
         env=rust_env,
     )
     require_fresh_artifact(cli, "Cargo")
+    require_fresh_artifact(shared_library, "Cargo")
     if not dynamo_rlib_artifacts(target):
         raise RuntimeError("Cargo did not freshly create the required dynamo_rs rlib")
     for archive in forbidden_static_archives(target):
@@ -379,7 +395,11 @@ def build_artifacts(env: dict[str, str]) -> tuple[Path, Path]:
     matlab_path = str(mex_dir).replace("'", "''")
     matlab = find_matlab()
     run(
-        (str(matlab), "-batch", f"cd('{matlab_path}'); build_rust_mex"),
+        (
+            str(matlab),
+            "-batch",
+            f"cd('{matlab_path}'); build_rust_mex('prebuilt')",
+        ),
         env=env,
     )
 

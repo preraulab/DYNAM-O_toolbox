@@ -1,6 +1,7 @@
 import io
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -10,6 +11,7 @@ from unittest.mock import call, patch
 from scripts.release_build import (
     MEX_WRAPPERS,
     UNIT_SEPARATOR,
+    build_artifacts,
     cargo_environment,
     cargo_target_directory,
     dynamo_rlib_artifacts,
@@ -190,6 +192,60 @@ class ReleaseBuildTests(unittest.TestCase):
                 "second": "fedcba9876543210",
             },
         )
+
+    @patch("scripts.release_build.sanitize_sboms")
+    @patch("scripts.release_build.find_matlab")
+    @patch("scripts.release_build.dynamo_rlib_artifacts")
+    @patch("scripts.release_build.require_fresh_artifact")
+    @patch("scripts.release_build.remove_stale_artifact")
+    @patch("scripts.release_build.run")
+    def test_native_build_reuses_prebuilt_library_for_matlab(
+        self,
+        run,
+        remove_stale_artifact,
+        require_fresh_artifact,
+        dynamo_rlib_artifacts,
+        find_matlab,
+        _sanitize_sboms,
+    ):
+        target = Path("/workspace/DYNAM-O_rs/rust/target")
+        rlib = target / "release" / "deps" / "libdynamo_rs-test.rlib"
+        dynamo_rlib_artifacts.return_value = [rlib]
+        find_matlab.return_value = Path("/Applications/MATLAB.app/bin/matlab")
+
+        with patch("scripts.release_build.ROOT", Path("/workspace")), patch(
+            "scripts.release_build.cargo_target_directory",
+            return_value=target,
+        ), patch("scripts.release_build.forbidden_static_archives", return_value=()):
+            build_artifacts({"CARGO_ENCODED_RUSTFLAGS": "controlled"})
+
+        cargo_command = run.call_args_list[0].args[0]
+        self.assertEqual(
+            cargo_command,
+            (
+                "cargo",
+                "build",
+                "--release",
+                "--locked",
+                "--bin",
+                "dynamo",
+                "--lib",
+            ),
+        )
+        matlab_command = run.call_args_list[1].args[0]
+        self.assertEqual(
+            matlab_command[-1],
+            "cd('/workspace/DYNAM-O/rust_bridge'); "
+            "build_rust_mex('prebuilt')",
+        )
+        if os.name == "nt":
+            library = target / "release" / "dynamo_rs.dll"
+        elif sys.platform == "darwin":
+            library = target / "release" / "libdynamo_rs.dylib"
+        else:
+            library = target / "release" / "libdynamo_rs.so"
+        self.assertIn(call(library), remove_stale_artifact.call_args_list)
+        self.assertIn(call(library, "Cargo"), require_fresh_artifact.call_args_list)
 
     def test_other_platform_binaries_receive_a_path_byte_scan(self):
         with tempfile.TemporaryDirectory() as directory:
