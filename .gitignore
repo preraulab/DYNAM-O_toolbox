@@ -1,6 +1,7 @@
 *.DS_store
 *.asv
 .aider*
+*__pycache__
 
 # Bootstrap-managed independent repositories
 /DYNAM-O/
