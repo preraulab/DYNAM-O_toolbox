@@ -480,12 +480,6 @@ def platform_artifacts(venv: Path) -> list[Path]:
             f"found {len(source_filters)}"
         )
     expected_filter_names = [path.name for path in source_filters]
-    matlab_filter_dir = mex_dir / "data_matlab_filters"
-    matlab_filters = [matlab_filter_dir / name for name in expected_filter_names]
-    actual_matlab_filters = sorted(path.name for path in matlab_filter_dir.glob("*.npy"))
-    if actual_matlab_filters != expected_filter_names:
-        raise RuntimeError("MATLAB runtime filter cache does not match DYNAM-O_rs")
-    artifacts.extend(matlab_filters)
 
     target = ROOT / "DYNAM-O_rs" / "rust" / "target" / "release"
     artifacts.append(target / cli)
