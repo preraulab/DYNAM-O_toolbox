@@ -737,6 +737,35 @@ def write_manifest(
     return path
 
 
+def print_success_summary() -> None:
+    if os.name == "nt":
+        matlab_command = 'cd DYNAM-O; matlab -r "runDYNAMO(\'segment\')"'
+        activate_command = r"DYNAM-O_py\.venv\Scripts\Activate.ps1"
+        cli = ROOT / "DYNAM-O_rs" / "rust" / "target" / "release" / "dynamo.exe"
+        cli_command = f'& "{cli}" --help'
+    else:
+        matlab_command = 'cd DYNAM-O && matlab -r "runDYNAMO(\'segment\')"'
+        activate_command = "source DYNAM-O_py/.venv/bin/activate"
+        cli = ROOT / "DYNAM-O_rs" / "rust" / "target" / "release" / "dynamo"
+        cli_command = f"{cli} --help"
+
+    print(
+        "\n[bootstrap] Bootstrap complete.\n"
+        "\n"
+        "Next steps — pick one:\n"
+        "\n"
+        "  MATLAB:\n"
+        f"    {matlab_command}\n"
+        "\n"
+        "  Python (pydynamo):\n"
+        f"    {activate_command}\n"
+        "    python -c 'import pydynamo; print(pydynamo.__version__)'\n"
+        "\n"
+        "  Rust CLI (no MATLAB or Python needed):\n"
+        f"    {cli_command}\n"
+    )
+
+
 def main() -> int:
     if len(sys.argv) > 1:
         if sys.argv[1:] == ["--help"]:
@@ -817,6 +846,7 @@ def main() -> int:
             return 1
         print(f"[release] Privacy gate passed for {len(artifacts)} artifact(s).")
         print(f"[release] Manifest: {manifest}")
+        print_success_summary()
         return 0
     except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"[release] ERROR: {exc}", file=sys.stderr)
