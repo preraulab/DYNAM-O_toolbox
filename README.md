@@ -15,7 +15,7 @@ common algorithm and Rust core:
 |---|---|---|
 | **MATLAB** | [`DYNAM-O`](https://github.com/preraulab/DYNAM-O) | authoritative pipeline, File Manager GUI, full statistics, standalone app builds |
 | **Rust core + CLI** | [`DYNAM-O_rs`](https://github.com/preraulab/DYNAM-O_rs) | shared kernel (watershed, merge, trim, baseline, SO-power/phase time series, artifact detection, 2D histograms) AND a standalone `dynamo` CLI binary — no MATLAB/Python needed at runtime |
-| **Python** | [`DYNAM-O_py`](https://github.com/preraulab/DYNAM-O_py) | MNE-based or scientific-Python workflows |
+| **Python** | [`DYNAM-O_py`](https://github.com/preraulab/DYNAM-O_py) | MNE-based or scientific-Python workflows (package is called `pydynamo`) |
 
 Each is usable on its own. Below, there's a dedicated install section for
 each — and each can optionally use the `dynamo_rs` Rust core for speed.
@@ -474,18 +474,18 @@ Detailed API, options, and recipes:
 </details>
 
 <details>
-<summary><strong> Python (<code>DYNAM-O_py</code> / pydynamo)</strong></summary>
+<summary><strong> Python (<code>DYNAM-O_py</code> / <code>pydynamo</code>)</strong></summary>
 
 Pydynamo runs end-to-end in Python. The Rust core is optional but strongly
-recommended — with `dynamo_rs` installed, pydynamo delegates watershed,
+recommended — with `dynamo_rs` installed, `pydynamo` delegates watershed,
 merge, trim, and histograms to Rust for roughly a 1.5–10× speedup depending
-on stage. Without Rust, pydynamo falls back to scipy / scikit-image
+on stage. Without Rust, `pydynamo` falls back to scipy / scikit-image
 implementations.
 
 Use the controlled meta-repository build whenever installing the native Python
 extensions. It creates `DYNAM-O_py/.venv`, installs the pinned Maturin version,
 builds both native extensions under the path-remapped environment, installs
-pydynamo in editable mode, sanitizes the generated SBOMs, and runs
+`pydynamo` in editable mode, sanitizes the generated SBOMs, and runs
 `scripts/check_install.py`.
 
 macOS, Linux, WSL, or Git-Bash:
@@ -506,7 +506,7 @@ powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Yes
 .\DYNAM-O_py\.venv\Scripts\Activate.ps1
 ```
 
-The controlled workflow does not yet produce standalone pydynamo,
+The controlled workflow does not yet produce standalone `pydynamo`,
 `dynamo_rs`, or `multitaper_rs` wheels for distribution. A wheel or native
 extension produced by a direct Maturin, pip, or other PEP 517 command is not a
 controlled release artifact and must not be published as one.
