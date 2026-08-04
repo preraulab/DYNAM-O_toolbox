@@ -283,22 +283,52 @@ if [ -n "$MEX_EXT" ] && [ -d "$MEX_DIR" ] && \
 fi
 
 # (f) committed libdynamo_rs.{so,dylib,dll} in rust_bridge/ was built against
-# a different DYNAM-O_rs SHA than the one currently checked out. Bootstrap
-# commits these with subject "chore: MEX binaries for <platform> (dynamo_rs @ <sha>)",
-# so we can recover the build SHA from the most recent commit that touched
-# the platform-appropriate dylib. Catches the publish-side inconsistency
-# where the committed wrapper expects a symbol that the committed dylib
-# doesn't export (seen in practice: undefined symbol dynamo_multitaper_spectrogram).
+# a different DYNAM-O_rs SHA than the one currently checked out. Catches the
+# publish-side inconsistency where the committed wrapper expects a symbol the
+# committed dylib doesn't export (seen in practice: undefined symbol
+# dynamo_multitaper_spectrogram), and now also the quieter case where the
+# binaries simply predate a source change and return stale numbers.
+#
+# Provenance comes from rust_bridge/build_manifest.json, written by
+# build_rust_mex.m. It used to be recovered from the git subject of the
+# commit that added the dylib ("... (dynamo_rs @ <sha>)"), which failed
+# open in three ways: the convention was easy to break (and WAS broken --
+# the binaries currently in the tree were committed with a subject carrying
+# no SHA, silently disabling this whole check), it needs a git checkout so
+# a tarball carried no provenance, and MATLAB could not read it. The commit
+# subject is still honored as a fallback for binaries predating the
+# manifest.
 if [ -n "$DYLIB_NAME" ] && [ -f "$MEX_DIR/$DYLIB_NAME" ]; then
-    LIB_COMMIT_MSG="$(git -C DYNAM-O_dev log -1 --pretty=format:%s -- "rust_bridge/$DYLIB_NAME" 2>/dev/null || echo '')"
-    LIB_BUILD_SHA="$(printf '%s' "$LIB_COMMIT_MSG" | grep -oE 'dynamo_rs @ [0-9a-f]+' | awk '{print $NF}' || true)"
+    LIB_BUILD_SHA=""
+    LIB_SHA_SOURCE=""
+    MANIFEST="$MEX_DIR/build_manifest.json"
+    if [ -f "$MANIFEST" ]; then
+        LIB_BUILD_SHA="$(grep -oE '"dynamo_rs_sha"[[:space:]]*:[[:space:]]*"[0-9a-f]+"' "$MANIFEST" \
+                          | grep -oE '[0-9a-f]{7,}' | head -1 || true)"
+        [ -n "$LIB_BUILD_SHA" ] && LIB_SHA_SOURCE="build_manifest.json"
+        if grep -qE '"dynamo_rs_dirty"[[:space:]]*:[[:space:]]*true' "$MANIFEST" 2>/dev/null; then
+            warn "rust_bridge/$DYLIB_NAME was built from a dirty DYNAM-O_rs tree; its recorded SHA is approximate"
+        fi
+    fi
+    if [ -z "$LIB_BUILD_SHA" ]; then
+        LIB_COMMIT_MSG="$(git -C DYNAM-O_dev log -1 --pretty=format:%s -- "rust_bridge/$DYLIB_NAME" 2>/dev/null || echo '')"
+        LIB_BUILD_SHA="$(printf '%s' "$LIB_COMMIT_MSG" | grep -oE 'dynamo_rs @ [0-9a-f]+' | awk '{print $NF}' || true)"
+        [ -n "$LIB_BUILD_SHA" ] && LIB_SHA_SOURCE="commit subject (legacy)"
+    fi
+
     CURRENT_RS_SHA="$(git -C DYNAM-O_rs rev-parse HEAD 2>/dev/null || echo '')"
-    if [ -n "$LIB_BUILD_SHA" ] && [ -n "$CURRENT_RS_SHA" ]; then
-        # LIB_BUILD_SHA is short; truncate CURRENT_RS_SHA to compare.
+    if [ -z "$LIB_BUILD_SHA" ]; then
+        # Fail CLOSED. Previously this branch silently did nothing, which is
+        # how the current binaries went unchecked. Unknown provenance is a
+        # reason to rebuild, not a reason to assume everything is fine.
+        NEEDS_MEX=true
+        MEX_REASONS+=("rust_bridge/$DYLIB_NAME has no recorded build provenance (no $MANIFEST); rebuilding will record it")
+    elif [ -n "$CURRENT_RS_SHA" ]; then
+        # LIB_BUILD_SHA may be short; compare on its length.
         CURRENT_RS_SHORT="$(printf '%s' "$CURRENT_RS_SHA" | cut -c1-${#LIB_BUILD_SHA})"
         if [ "$LIB_BUILD_SHA" != "$CURRENT_RS_SHORT" ]; then
             NEEDS_MEX=true
-            MEX_REASONS+=("rust_bridge/$DYLIB_NAME was built at dynamo_rs @ $LIB_BUILD_SHA, but DYNAM-O_rs is now at @ $CURRENT_RS_SHORT (committed dylib is stale)")
+            MEX_REASONS+=("rust_bridge/$DYLIB_NAME was built at dynamo_rs @ $LIB_BUILD_SHA (per $LIB_SHA_SOURCE), but DYNAM-O_rs is now at @ $CURRENT_RS_SHORT (committed dylib is stale)")
         fi
     fi
 fi
