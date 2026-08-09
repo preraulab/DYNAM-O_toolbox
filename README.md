@@ -14,7 +14,7 @@ common algorithm and Rust core:
 | Implementation | Repo | Best for |
 |---|---|---|
 | **MATLAB** | [`DYNAM-O`](https://github.com/preraulab/DYNAM-O) | authoritative pipeline, File Manager GUI, full statistics, standalone app builds |
-| **Rust core + CLI** | [`DYNAM-O_rs`](https://github.com/preraulab/DYNAM-O_rs) | shared kernel (watershed, merge, trim, baseline, SO-power/phase time series, artifact detection, 2D histograms) AND a standalone `dynamo` CLI binary — no MATLAB/Python needed at runtime |
+| **Rust core** | [`DYNAM-O_rs`](https://github.com/preraulab/DYNAM-O_rs) | shared kernel (watershed, merge, trim, baseline, SO-power/phase time series, artifact detection, 2D histograms) that the MATLAB and Python front ends both call. Also ships a small `dynamo` developer binary for driving the extraction slice from a shell |
 | **Python** | [`DYNAM-O_py`](https://github.com/preraulab/DYNAM-O_py) | MNE-based or scientific-Python workflows (package is called `pydynamo`) |
 
 Each is usable on its own. Below, there's a dedicated install section for
@@ -364,8 +364,9 @@ Are you in Python / using MNE-Python?                      →  DYNAM-O_py (pydy
     Want the native extensions?                            →  bootstrap Yes + privacy gate
 
 Are you integrating Rust into your own pipeline?           →  DYNAM-O_rs (library)
-    Want a local CLI with no MATLAB/Python runtime?        →  DYNAM-O_rs CLI (`dynamo extract`)
-    Publishing that CLI?                                   →  bootstrap Yes + privacy gate
+    Driving the extraction kernel from a shell?            →  DYNAM-O_rs `dynamo extract` (dev utility:
+                                                              pre-computed spectrogram in, peaks out)
+    Publishing that binary?                                →  bootstrap Yes + privacy gate
 ```
 
 - **Most MATLAB users:** clone
@@ -586,7 +587,7 @@ dynamo_rs = { git = "https://github.com/preraulab/DYNAM-O_rs", branch = "master"
 
 Then `use dynamo_rs::...;` — see the public items in `src/lib.rs`.
 
-#### 5. Build a local standalone `dynamo` CLI (no MATLAB or Python)
+#### 5. Build the local `dynamo` developer binary (no MATLAB or Python)
 
 This direct Cargo build is for local development only. To distribute the CLI,
 build it through the top-level bootstrap **Yes** path and privacy gate.
@@ -606,9 +607,12 @@ peak-stats CSV with the same columns as MATLAB's `stats_table`. Use
 `--help` to see all `ExtractParams` overrides (seg-time, merge-thresh,
 trim-vol, dur/bw filters, etc).
 
-Full EDF-to-CSV orchestration (multitaper + baseline + refine + histograms)
-is still roadmap; every individual stage already has a public Rust
-function, the CLI just needs stitching. See
+This binary is a development utility, not a general-purpose DYNAM-O
+command-line tool: it never opens an EDF, and does not compute the
+spectrogram, subtract a baseline, refine peaks, or build histograms.
+Producing the three input arrays is the caller's job, and the MATLAB
+toolbox and `pydynamo` remain the supported ways to run a study end to
+end. See
 [`DYNAM-O_rs/README.md`](https://github.com/preraulab/DYNAM-O_rs/blob/master/README.md)
 for the full module map.
 
