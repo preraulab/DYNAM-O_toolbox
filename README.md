@@ -602,8 +602,9 @@ cargo build --release --locked --bin dynamo
 ```
 
 Takes a pre-computed multitaper spectrogram (three `.npy` files — any
-numpy / MATLAB / Rust multitaper implementation will do) and writes a
-peak-stats CSV with the same columns as MATLAB's `stats_table`. Use
+numpy / MATLAB / Rust multitaper implementation will do) and writes the
+canonical DYNAM-O stats CSV (14 columns plus a `#` provenance preamble,
+readable by every DYNAM-O implementation). Use
 `--help` to see all `ExtractParams` overrides (seg-time, merge-thresh,
 trim-vol, dur/bw filters, etc).
 
