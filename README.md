@@ -16,6 +16,7 @@ common algorithm and Rust core:
 | **MATLAB** | [`DYNAM-O`](https://github.com/preraulab/DYNAM-O) | authoritative pipeline, File Manager GUI, full statistics, standalone app builds |
 | **Rust core** | [`DYNAM-O_rs`](https://github.com/preraulab/DYNAM-O_rs) | shared kernel (watershed, merge, trim, baseline, SO-power/phase time series, artifact detection, 2D histograms) that the MATLAB and Python front ends both call. Also ships a small `dynamo` developer binary for driving the extraction slice from a shell |
 | **Python** | [`DYNAM-O_py`](https://github.com/preraulab/DYNAM-O_py) | MNE-based or scientific-Python workflows (package is called `pydynamo`) |
+| **Desktop app + CLI** | [`DYNAM-O_DesktopApp`](https://github.com/preraulab/DYNAM-O_DesktopApp) | end-to-end runs with no MATLAB and no Python: the cross-platform GUI (Results Browser included) and `dynamo-cli`, the cluster-ready headless runner (EDF + staging in, full output tree out) |
 
 Each is usable on its own. Below, there's a dedicated install section for
 each — and each can optionally use the `dynamo_rs` Rust core for speed.
@@ -363,9 +364,15 @@ Are you writing MATLAB code or need the File Manager GUI?  →  DYNAM-O (MATLAB)
 Are you in Python / using MNE-Python?                      →  DYNAM-O_py (pydynamo)
     Want the native extensions?                            →  bootstrap Yes + privacy gate
 
+Want to run a study end-to-end with no MATLAB and no Python?
+                                                           →  DYNAM-O_DesktopApp: the desktop GUI, or
+                                                              `dynamo-cli` for clusters (EDF + staging in,
+                                                              full output tree + aggregates out)
+
 Are you integrating Rust into your own pipeline?           →  DYNAM-O_rs (library)
     Driving the extraction kernel from a shell?            →  DYNAM-O_rs `dynamo extract` (dev utility:
-                                                              pre-computed spectrogram in, peaks out)
+                                                              pre-computed spectrogram in, peaks out);
+                                                              for whole studies use `dynamo-cli` above
     Publishing that binary?                                →  bootstrap Yes + privacy gate
 ```
 
@@ -602,8 +609,9 @@ cargo build --release --locked --bin dynamo
 ```
 
 Takes a pre-computed multitaper spectrogram (three `.npy` files — any
-numpy / MATLAB / Rust multitaper implementation will do) and writes a
-peak-stats CSV with the same columns as MATLAB's `stats_table`. Use
+numpy / MATLAB / Rust multitaper implementation will do) and writes the
+canonical DYNAM-O stats CSV (14 columns plus a `#` provenance preamble,
+readable by every DYNAM-O implementation). Use
 `--help` to see all `ExtractParams` overrides (seg-time, merge-thresh,
 trim-vol, dur/bw filters, etc).
 
@@ -799,6 +807,11 @@ DYNAM-O_toolbox/
 ├── DYNAM-O/                (MATLAB toolbox, GUI, File Manager)
 ├── DYNAM-O_rs/             (pure-Rust kernel)
 └── DYNAM-O_py/             (Python port / pydynamo)
+
+DYNAM-O_DesktopApp/         (sibling repo, cloned separately: desktop GUI +
+                             dynamo-cli, the end-to-end Rust runner; its
+                             documents/OUTPUT_FORMAT.md is the normative
+                             spec for the shared output tree + provenance)
 ```
 
 ---
