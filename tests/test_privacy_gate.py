@@ -1,13 +1,30 @@
+import json
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.privacy_gate import _elf_findings, scan_artifacts
+from scripts.privacy_gate import (
+    _elf_findings,
+    scan_artifacts,
+    scan_bytes,
+    sensitive_needles,
+)
 
 
 class PrivacyGateTests(unittest.TestCase):
+    def scan_text(self, value, sensitive_paths=()):
+        data = value.encode() + b"\0" + value.encode("utf-16-le")
+        return scan_bytes(data, "fixture", sensitive_needles(sensitive_paths))
+
+    def assert_encodings_found(self, findings, marker):
+        for encoding in ("ASCII", "UTF-16LE"):
+            with self.subTest(encoding=encoding):
+                self.assertTrue(
+                    any(f"{encoding} {marker}" in item for item in findings)
+                )
+
     def test_accepts_clean_binary(self):
         with tempfile.TemporaryDirectory() as directory:
             artifact = Path(directory) / "clean.bin"
@@ -34,6 +51,23 @@ class PrivacyGateTests(unittest.TestCase):
             )
 
             self.assertEqual(scan_artifacts([artifact], []), [])
+
+    def test_generic_windows_path_requires_plausible_hierarchy(self):
+        one_component = r"B:\9@^9"
+        self.assertEqual(self.scan_text(one_component), [])
+        self.assertEqual(self.scan_text(r"K:\b\q^"), [])
+
+        findings = self.scan_text(one_component + r"\src")
+        self.assert_encodings_found(findings, "absolute Windows path")
+
+        exact_findings = self.scan_text(one_component, [one_component])
+        self.assert_encodings_found(exact_findings, "path marker")
+
+    def test_rejects_compact_windows_ci_path(self):
+        path = r"D:\a\1\s"
+        for value in (path, json.dumps({"path": path})):
+            findings = self.scan_text(value)
+            self.assert_encodings_found(findings, "absolute Windows path")
 
     def test_rejects_ascii_and_utf16_paths(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -71,11 +105,73 @@ class PrivacyGateTests(unittest.TestCase):
                 any("UTF-16LE absolute Windows UNC" in item for item in findings)
             )
 
+    def test_generic_unc_path_requires_plausible_hierarchy(self):
+        low_evidence = (r"\\c\j\q\x", r"\\&O\BN_")
+        for value in low_evidence:
+            self.assertEqual(self.scan_text(value), [])
+
+        findings = self.scan_text(r"\\server\share\src")
+        self.assert_encodings_found(findings, "absolute Windows UNC")
+
+        exact_findings = self.scan_text(low_evidence[0], [low_evidence[0]])
+        self.assert_encodings_found(exact_findings, "path marker")
+
+    def test_rejects_nested_unc_paths_with_short_root_components(self):
+        paths = (r"\\server\x\project", r"\\s\share\project")
+        for path in paths:
+            for value in (path, json.dumps({"path": path})):
+                findings = self.scan_text(value)
+                self.assert_encodings_found(findings, "absolute Windows UNC")
+
+    def test_scans_json_escaped_windows_paths(self):
+        drive_path = r"D:\agent\_work\crate"
+        unc_path = r"\\server\share\src"
+        extended_unc_path = r"\\?\UNC\server\share\src"
+        payload = json.dumps(
+            {
+                "drive": drive_path,
+                "unc": unc_path,
+                "extended_unc": extended_unc_path,
+            }
+        )
+        findings = self.scan_text(payload)
+        self.assert_encodings_found(findings, "absolute Windows path")
+        for expected in (unc_path, extended_unc_path):
+            serialized = repr(expected.replace("\\", "\\\\"))
+            for encoding in ("ASCII", "UTF-16LE"):
+                self.assertTrue(
+                    any(
+                        f"{encoding} absolute Windows UNC" in item
+                        and serialized in item
+                        for item in findings
+                    )
+                )
+
+        exact_path = r"B:\9@^9"
+        exact_payload = json.dumps({"path": exact_path})
+        exact_findings = self.scan_text(exact_payload, [exact_path])
+        self.assert_encodings_found(exact_findings, "path marker")
+
+    def test_allows_json_escaped_relative_windows_path(self):
+        relative = r"relative\directory\src\file.rs"
+        self.assertEqual(self.scan_text(json.dumps({"path": relative})), [])
+
+    def test_rejects_windows_unc_share_roots(self):
+        for unc in (r"\\server\share", r"\\?\UNC\server\share"):
+            for value in (unc, json.dumps({"path": unc})):
+                findings = self.scan_text(value)
+                self.assert_encodings_found(
+                    findings, "absolute Windows UNC"
+                )
+
     def test_rejects_extended_windows_unc_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             artifact = Path(directory) / "extended-unc.pdb"
             unc = r"\\?\UNC\server\share\project\src\lib.rs"
-            artifact.write_bytes(unc.encode() + b"\0" + unc.encode("utf-16-le"))
+            prefixed = "path:" + unc
+            artifact.write_bytes(
+                prefixed.encode() + b"\0" + prefixed.encode("utf-16-le")
+            )
 
             findings = scan_artifacts([artifact], [])
 
