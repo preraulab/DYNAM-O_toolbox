@@ -450,8 +450,8 @@ cd <workspace>/DYNAM-O/rust_bridge
 build_rust_mex
 ```
 
-Produces ten platform-specific MEX files in `rust_bridge/`, corresponding to
-the ten C wrappers in that directory. Extension per platform:
+Produces eleven platform-specific MEX files in `rust_bridge/`, corresponding to
+the eleven C wrappers in that directory. Extension per platform:
 `.mexmaca64` (Apple
 Silicon), `.mexmaci64` (Intel Mac), `.mexa64` (Linux), `.mexw64` (Windows).
 
