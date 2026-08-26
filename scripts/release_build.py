@@ -35,6 +35,7 @@ MEX_WRAPPERS = (
     "baseline_mex",
     "so_power_mex",
     "so_phase_mex",
+    "dynamo_version_mex",
 )
 NATIVE_BINARY_SUFFIXES = {
     ".dll",

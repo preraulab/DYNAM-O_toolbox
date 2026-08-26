@@ -457,6 +457,7 @@ class ReleaseBuildTests(unittest.TestCase):
                 artifacts = platform_artifacts(venv)
 
             self.assertIn(native_module, artifacts)
+            self.assertIn(mex_dir / "dynamo_version_mex.mexa64", artifacts)
             self.assertIn(python_filters / "filter_0.npy", artifacts)
             self.assertIn(header, artifacts)
             self.assertFalse((mex_dir / "data_matlab_filters").exists())
