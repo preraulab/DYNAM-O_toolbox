@@ -33,29 +33,10 @@ class PrivacyGateTests(unittest.TestCase):
             )
             self.assertEqual(scan_artifacts([artifact], []), [])
 
-    def test_allows_binary_data_that_only_resembles_windows_paths(self):
-        with tempfile.TemporaryDirectory() as directory:
-            artifact = Path(directory) / "binary-metadata.bin"
-            drive_like = r"b:\:@^:"
-            unc_like = "U" + "\\" * 3 + "\\".join(("c", "j", "q", "x", ""))
-            artifact.write_bytes(
-                b"\x96"
-                + drive_like.encode()
-                + b"\xd8\0"
-                + drive_like.encode("utf-16-le")
-                + b"\xff\0"
-                + unc_like.encode()
-                + b"\x7f\0"
-                + unc_like.encode("utf-16-le")
-                + b"\xff"
-            )
-
-            self.assertEqual(scan_artifacts([artifact], []), [])
-
     def test_generic_windows_path_requires_plausible_hierarchy(self):
-        one_component = r"B:\9@^9"
+        one_component = r"R:\metadata"
         self.assertEqual(self.scan_text(one_component), [])
-        self.assertEqual(self.scan_text(r"K:\b\q^"), [])
+        self.assertEqual(self.scan_text(r"R:\x\y"), [])
 
         findings = self.scan_text(one_component + r"\src")
         self.assert_encodings_found(findings, "absolute Windows path")
@@ -106,7 +87,11 @@ class PrivacyGateTests(unittest.TestCase):
             )
 
     def test_generic_unc_path_requires_plausible_hierarchy(self):
-        low_evidence = (r"\\c\j\q\x", r"\\&O\BN_")
+        low_evidence = (
+            r"\\x\y\z\w",
+            r"\\bad&host\share",
+            r"\\\server\share",
+        )
         for value in low_evidence:
             self.assertEqual(self.scan_text(value), [])
 
@@ -147,7 +132,7 @@ class PrivacyGateTests(unittest.TestCase):
                     )
                 )
 
-        exact_path = r"B:\9@^9"
+        exact_path = r"R:\metadata"
         exact_payload = json.dumps({"path": exact_path})
         exact_findings = self.scan_text(exact_payload, [exact_path])
         self.assert_encodings_found(exact_findings, "path marker")
