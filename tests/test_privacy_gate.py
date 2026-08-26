@@ -16,6 +16,25 @@ class PrivacyGateTests(unittest.TestCase):
             )
             self.assertEqual(scan_artifacts([artifact], []), [])
 
+    def test_allows_binary_data_that_only_resembles_windows_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "binary-metadata.bin"
+            drive_like = r"b:\:@^:"
+            unc_like = "U" + "\\" * 3 + "\\".join(("c", "j", "q", "x", ""))
+            artifact.write_bytes(
+                b"\x96"
+                + drive_like.encode()
+                + b"\xd8\0"
+                + drive_like.encode("utf-16-le")
+                + b"\xff\0"
+                + unc_like.encode()
+                + b"\x7f\0"
+                + unc_like.encode("utf-16-le")
+                + b"\xff"
+            )
+
+            self.assertEqual(scan_artifacts([artifact], []), [])
+
     def test_rejects_ascii_and_utf16_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             artifact = Path(directory) / "leaky.dll"
