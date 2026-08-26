@@ -29,6 +29,28 @@ GENERIC_PATHS = (
     b"C:/Users/",
 )
 
+# Exact sensitive needles below catch known build roots regardless of shape. The
+# generic fallbacks require plausible multi-component structure because short
+# path-shaped byte runs are otherwise indistinguishable from encoded LLVM bitcode.
+_ASCII_WINDOWS_DRIVE_CANDIDATE = re.compile(
+    rb"[A-Za-z]:[\\/](?:(?![<>:\"|?*])[ -~]){2,300}"
+)
+_UTF16LE_WINDOWS_DRIVE_CANDIDATE = re.compile(
+    rb"[A-Za-z]\x00:\x00[\\/]\x00"
+    rb"(?:(?![<>:\"|?*]\x00)[ -~]\x00){2,300}"
+)
+_ASCII_WINDOWS_UNC_CANDIDATE = re.compile(
+    rb"(?<![\\/])\\{2,4}"
+    rb"(?:[?]\\{1,2}[Uu][Nn][Cc]\\{1,2})?"
+    rb"(?:(?![<>:\"|?*])[ -~]){3,300}"
+)
+_UTF16LE_WINDOWS_UNC_CANDIDATE = re.compile(
+    rb"(?<![\\/]\x00)(?:\\\x00){2,4}"
+    rb"(?:[?]\x00(?:\\\x00){1,2}"
+    rb"[Uu]\x00[Nn]\x00[Cc]\x00(?:\\\x00){1,2})?"
+    rb"(?:(?![<>:\"|?*]\x00)[ -~]\x00){3,300}"
+)
+
 
 def _path_variants(path: str) -> set[bytes]:
     raw = os.path.expanduser(path).rstrip("/\\")
@@ -39,6 +61,7 @@ def _path_variants(path: str) -> set[bytes]:
     }
     variants.update(value.replace("\\", "/") for value in list(variants))
     variants.update(value.replace("/", "\\") for value in list(variants))
+    variants.update(value.replace("\\", "\\\\") for value in list(variants))
     return {
         encoded
         for variant in variants
@@ -59,6 +82,67 @@ def sensitive_needles(paths: Iterable[str]) -> set[bytes]:
     return needles
 
 
+def _windows_valid_prefix(value: str) -> str:
+    return re.split(r'[<>:"|?*]', value, maxsplit=1)[0]
+
+
+def _windows_components(value: str) -> list[str]:
+    valid_prefix = _windows_valid_prefix(value)
+    return [part for part in re.split(r"[\\/]+", valid_prefix) if part]
+
+
+def _has_substantive_windows_component(components: Sequence[str]) -> bool:
+    return any(
+        sum(character.isascii() and character.isalnum() for character in component)
+        >= 2
+        for component in components
+    )
+
+
+def _looks_like_windows_drive_path(value: str) -> bool:
+    components = _windows_components(value[3:])
+    if len(components) < 2:
+        return False
+    return len(components) >= 3 or (
+        len(components[0]) >= 2
+        and len(components[1]) >= 2
+        and _has_substantive_windows_component(components)
+    )
+
+
+def _looks_like_windows_unc_path(value: str) -> bool:
+    leading_backslashes = len(value) - len(value.lstrip("\\"))
+    if leading_backslashes not in (2, 4):
+        return False
+    serialized = leading_backslashes == 4
+    tail = value[leading_backslashes:]
+    extended_prefix = "?\\\\unc\\\\" if serialized else "?\\unc\\"
+    if tail.lower().startswith(extended_prefix):
+        tail = tail[len(extended_prefix) :]
+    elif tail.startswith("?"):
+        return False
+    valid_tail = _windows_valid_prefix(tail)
+    separator_width = 2 if serialized else 1
+    if any(
+        len(separator) != separator_width
+        for separator in re.findall(r"\\+", valid_tail)
+    ):
+        return False
+    components = [part for part in re.split(r"\\+", valid_tail) if part]
+    if len(components) < 2:
+        return False
+    server, share = components[:2]
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", server):
+        return False
+    server_alphanumerics = sum(
+        character.isascii() and character.isalnum() for character in server
+    )
+    return _has_substantive_windows_component(components) and (
+        len(components) >= 3
+        or (server_alphanumerics >= 2 and len(share) >= 2)
+    )
+
+
 def scan_bytes(data: bytes, label: str, needles: set[bytes]) -> list[str]:
     findings = []
     for needle in sorted(needles, key=len, reverse=True):
@@ -69,43 +153,37 @@ def scan_bytes(data: bytes, label: str, needles: set[bytes]) -> list[str]:
                 errors="replace",
             )
             findings.append(f"{label}: {encoding} path marker {display!r}")
-    for match in re.finditer(
-        rb"[A-Za-z]:[\\/](?![<>:\"|?*])[ -~]{2,300}", data
-    ):
+    for match in _ASCII_WINDOWS_DRIVE_CANDIDATE.finditer(data):
         if data[match.start() + 2 : match.start() + 4] == b"//":
             continue
-        findings.append(
-            f"{label}: ASCII absolute Windows path {match.group(0).decode(errors='replace')!r}"
-        )
-    for match in re.finditer(
-        rb"[A-Za-z]\x00:\x00[\\/]\x00"
-        rb"(?![<>:\"|?*]\x00)(?:[ -~]\x00){2,300}",
-        data,
-    ):
-        if data[match.start() + 4 : match.start() + 8] == b"/\x00/\x00":
+        display = match.group(0).decode(errors="replace")
+        if not _looks_like_windows_drive_path(display):
             continue
         findings.append(
-            f"{label}: UTF-16LE absolute Windows path "
-            f"{match.group(0).decode('utf-16-le', errors='replace')!r}"
+            f"{label}: ASCII absolute Windows path {display!r}"
         )
-    for match in re.finditer(
-        rb"(?<![\\/])\\\\[A-Za-z0-9.?_-]+\\[A-Za-z0-9$._ -]+"
-        rb"(?:\\[ -~]{1,300})?",
-        data,
-    ):
+    for match in _UTF16LE_WINDOWS_DRIVE_CANDIDATE.finditer(data):
+        if data[match.start() + 4 : match.start() + 8] == b"/\x00/\x00":
+            continue
+        display = match.group(0).decode("utf-16-le", errors="replace")
+        if not _looks_like_windows_drive_path(display):
+            continue
         findings.append(
-            f"{label}: ASCII absolute Windows UNC path "
-            f"{match.group(0).decode(errors='replace')!r}"
+            f"{label}: UTF-16LE absolute Windows path {display!r}"
         )
-    for match in re.finditer(
-        rb"(?<![\\/]\x00)\\\x00\\\x00(?:[A-Za-z0-9.?_-]\x00)+"
-        rb"\\\x00(?:[A-Za-z0-9$._ -]\x00)+"
-        rb"(?:\\\x00(?:[ -~]\x00){1,300})?",
-        data,
-    ):
+    for match in _ASCII_WINDOWS_UNC_CANDIDATE.finditer(data):
+        display = match.group(0).decode(errors="replace")
+        if not _looks_like_windows_unc_path(display):
+            continue
         findings.append(
-            f"{label}: UTF-16LE absolute Windows UNC path "
-            f"{match.group(0).decode('utf-16-le', errors='replace')!r}"
+            f"{label}: ASCII absolute Windows UNC path {display!r}"
+        )
+    for match in _UTF16LE_WINDOWS_UNC_CANDIDATE.finditer(data):
+        display = match.group(0).decode("utf-16-le", errors="replace")
+        if not _looks_like_windows_unc_path(display):
+            continue
+        findings.append(
+            f"{label}: UTF-16LE absolute Windows UNC path {display!r}"
         )
     return findings
 
