@@ -69,14 +69,18 @@ def scan_bytes(data: bytes, label: str, needles: set[bytes]) -> list[str]:
                 errors="replace",
             )
             findings.append(f"{label}: {encoding} path marker {display!r}")
-    for match in re.finditer(rb"[A-Za-z]:[\\/][ -~]{2,300}", data):
+    for match in re.finditer(
+        rb"[A-Za-z]:[\\/](?![<>:\"|?*])[ -~]{2,300}", data
+    ):
         if data[match.start() + 2 : match.start() + 4] == b"//":
             continue
         findings.append(
             f"{label}: ASCII absolute Windows path {match.group(0).decode(errors='replace')!r}"
         )
     for match in re.finditer(
-        rb"[A-Za-z]\x00:\x00[\\/]\x00(?:[ -~]\x00){2,300}", data
+        rb"[A-Za-z]\x00:\x00[\\/]\x00"
+        rb"(?![<>:\"|?*]\x00)(?:[ -~]\x00){2,300}",
+        data,
     ):
         if data[match.start() + 4 : match.start() + 8] == b"/\x00/\x00":
             continue
@@ -85,7 +89,7 @@ def scan_bytes(data: bytes, label: str, needles: set[bytes]) -> list[str]:
             f"{match.group(0).decode('utf-16-le', errors='replace')!r}"
         )
     for match in re.finditer(
-        rb"\\\\[A-Za-z0-9.?_-]+\\[A-Za-z0-9$._ -]+"
+        rb"(?<![\\/])\\\\[A-Za-z0-9.?_-]+\\[A-Za-z0-9$._ -]+"
         rb"(?:\\[ -~]{1,300})?",
         data,
     ):
@@ -94,7 +98,7 @@ def scan_bytes(data: bytes, label: str, needles: set[bytes]) -> list[str]:
             f"{match.group(0).decode(errors='replace')!r}"
         )
     for match in re.finditer(
-        rb"\\\x00\\\x00(?:[A-Za-z0-9.?_-]\x00)+"
+        rb"(?<![\\/]\x00)\\\x00\\\x00(?:[A-Za-z0-9.?_-]\x00)+"
         rb"\\\x00(?:[A-Za-z0-9$._ -]\x00)+"
         rb"(?:\\\x00(?:[ -~]\x00){1,300})?",
         data,
