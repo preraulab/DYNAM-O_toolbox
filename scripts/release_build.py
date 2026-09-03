@@ -781,6 +781,33 @@ def print_success_summary() -> None:
     )
 
 
+def require_native_interpreter() -> None:
+    """Refuse a Rosetta-translated Python on Apple Silicon.
+
+    Child processes inherit the translation, so MATLAB resolves its
+    architecture as maci64 (which R2025b no longer ships) and the MEX
+    extension would be mislabelled mexmaci64.
+    """
+    if sys.platform != "darwin" or platform.machine() == "arm64":
+        return
+    try:
+        native = subprocess.run(
+            ("sysctl", "-n", "hw.optional.arm64"),
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+    except OSError:
+        return
+    if native == "1":
+        raise RuntimeError(
+            "This Python is running as x86_64 under Rosetta on an Apple Silicon "
+            f"Mac ({sys.executable}). The release build must use a native arm64 "
+            "Python 3.9+ so MATLAB and cargo run natively; install one "
+            "(e.g. brew install python) and rerun bootstrap.sh."
+        )
+
+
 def main() -> int:
     if len(sys.argv) > 1:
         if sys.argv[1:] == ["--help"]:
@@ -793,6 +820,7 @@ def main() -> int:
         print("usage: release_build.py", file=sys.stderr)
         return 2
     try:
+        require_native_interpreter()
         require_clean(ROOT)
         toolbox_sha = git(ROOT, "rev-parse", "HEAD", capture=True)
         missing = [name for name in REPOSITORIES if not (ROOT / name / ".git").exists()]
