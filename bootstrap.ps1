@@ -57,6 +57,53 @@ if ($originUrl -match '^https://github\.com/') {
     $cloneBase = 'git@github.com:preraulab'
 }
 
+# -- Self-currency ---------------------------------------------------------
+# The child repositories are force-synced to origin/master below, but this
+# script IS the orchestrator repository - a stale checkout of it happily
+# runs old sync/build logic. Fetch our own origin and, when master is
+# cleanly behind, fast-forward and re-exec the updated script (guarded so
+# a re-exec cannot loop). A dirty or diverged checkout is reported instead
+# of touched; an offline fetch is a warning, not a stop.
+if ($env:DYNAMO_BOOTSTRAP_REEXEC -ne '1') {
+    # Windows PowerShell treats native stderr as error records under
+    # ErrorActionPreference Stop; relax it for the offline-tolerant fetch.
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $gitExecutable -C $repoRoot fetch origin master --prune --quiet 2>$null
+    $fetchExit = $LASTEXITCODE
+    $ErrorActionPreference = $previousEap
+    if ($fetchExit -ne 0) {
+        Write-Host '[bootstrap] Could not fetch origin for the toolbox repo (offline?); running the local copy.' -ForegroundColor Yellow
+    } else {
+        $selfHead   = (& $gitExecutable -C $repoRoot rev-parse HEAD).Trim()
+        $selfRemote = (& $gitExecutable -C $repoRoot rev-parse origin/master).Trim()
+        if ($selfHead -ne $selfRemote) {
+            & $gitExecutable -C $repoRoot merge-base --is-ancestor $selfRemote $selfHead
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host '[bootstrap] Toolbox repo is ahead of origin/master; running the local copy.' -ForegroundColor Yellow
+            } else {
+                & $gitExecutable -C $repoRoot merge-base --is-ancestor $selfHead $selfRemote
+                if ($LASTEXITCODE -ne 0) {
+                    throw 'Toolbox repo has diverged from origin/master; reconcile it, then rerun.'
+                }
+                $selfStatus = @(& $gitExecutable -C $repoRoot status --porcelain --untracked-files=no)
+                if ($selfStatus.Count -gt 0) {
+                    throw "Toolbox repo is behind origin/master but has local changes; commit or stash them, run 'git pull', then rerun bootstrap."
+                }
+                Info 'Updating bootstrap itself to origin/master...'
+                Invoke-Git -Step 'Fast-forwarding the toolbox repo' `
+                    -Arguments @('-C', $repoRoot, 'merge', '--ff-only', 'origin/master')
+                OK 'Toolbox repo updated; re-running the current bootstrap.'
+                $env:DYNAMO_BOOTSTRAP_REEXEC = '1'
+                $reexecArguments = @()
+                if ($Yes) { $reexecArguments += '-Yes' }
+                & (Join-Path $repoRoot 'bootstrap.ps1') @reexecArguments
+                exit $LASTEXITCODE
+            }
+        }
+    }
+}
+
 $repositories = @(
     @{ Name = 'DYNAM-O_rs'; Repository = 'DYNAM-O_rs' },
     @{ Name = 'DYNAM-O';    Repository = 'DYNAM-O' },

@@ -33,6 +33,50 @@ if ! command -v git >/dev/null 2>&1; then
     exit 1
 fi
 
+# ── Self-currency ────────────────────────────────────────────────────────
+# The child repositories are force-synced to origin/master below, but this
+# script IS the orchestrator repository — a stale checkout of it happily
+# runs old sync/build logic. Fetch our own origin and, when master is
+# cleanly behind, fast-forward and re-exec the updated script (guarded so
+# a re-exec can't loop). A dirty or diverged checkout is reported instead
+# of touched; an offline fetch is a warning, not a stop.
+self_update() {
+    if [ "${DYNAMO_BOOTSTRAP_REEXEC:-}" = "1" ]; then
+        return 0
+    fi
+    if ! git -C "$REPO_ROOT" fetch origin master --prune --quiet 2>/dev/null; then
+        warn "Could not fetch origin for the toolbox repo (offline?); running the local copy."
+        return 0
+    fi
+    local head remote
+    head="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+    remote="$(git -C "$REPO_ROOT" rev-parse origin/master)"
+    if [ "$head" = "$remote" ]; then
+        return 0
+    fi
+    if git -C "$REPO_ROOT" merge-base --is-ancestor "$remote" "$head"; then
+        # Local commits on top of origin/master — a development checkout.
+        warn "Toolbox repo is ahead of origin/master; running the local copy."
+        return 0
+    fi
+    if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$head" "$remote"; then
+        err "Toolbox repo has diverged from origin/master; reconcile it, then rerun."
+        exit 1
+    fi
+    local status
+    status="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
+    if [ -n "$status" ]; then
+        err "Toolbox repo is behind origin/master but has local changes;"
+        err "commit or stash them, run 'git pull', then rerun bootstrap."
+        exit 1
+    fi
+    info "Updating bootstrap itself to origin/master..."
+    git -C "$REPO_ROOT" merge --ff-only origin/master
+    ok "Toolbox repo updated; re-running the current bootstrap."
+    DYNAMO_BOOTSTRAP_REEXEC=1 exec "$REPO_ROOT/bootstrap.sh" "$@"
+}
+self_update "$@"
+
 AUTO_YES=false
 while [ $# -gt 0 ]; do
     case "$1" in
