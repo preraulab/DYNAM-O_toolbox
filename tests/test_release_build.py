@@ -418,7 +418,7 @@ class ReleaseBuildTests(unittest.TestCase):
             (mex_dir / "libdynamo_rs.so").write_bytes(b"ELF")
             source_filters = root / "DYNAM-O_rs" / "data_matlab_filters"
             source_filters.mkdir(parents=True)
-            for index in range(42):
+            for index in range(48):
                 name = f"filter_{index}.npy"
                 (source_filters / name).write_bytes(b"NUMPY")
 
@@ -437,7 +437,7 @@ class ReleaseBuildTests(unittest.TestCase):
             native_module.write_bytes(b"NATIVE")
             python_filters = dynamo_package / "data_matlab_filters"
             python_filters.mkdir()
-            for index in range(42):
+            for index in range(48):
                 (python_filters / f"filter_{index}.npy").write_bytes(b"NUMPY")
             multitaper = packages / "multitaper_rs.abi3.so"
             multitaper.write_bytes(b"NATIVE")

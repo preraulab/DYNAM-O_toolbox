@@ -495,9 +495,9 @@ def platform_artifacts(venv: Path) -> list[Path]:
     source_filters = sorted(
         (ROOT / "DYNAM-O_rs" / "data_matlab_filters").glob("*.npy")
     )
-    if len(source_filters) != 42:
+    if len(source_filters) != 48:
         raise RuntimeError(
-            "DYNAM-O_rs must contain exactly 42 canonical filter-cache files; "
+            "DYNAM-O_rs must contain exactly 48 canonical filter-cache files; "
             f"found {len(source_filters)}"
         )
     expected_filter_names = [path.name for path in source_filters]
